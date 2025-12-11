@@ -1,0 +1,15 @@
+# Model settings
+models:
+  embedding_model: "cohere.embed-english-v3"  # AWS Bedrock embedding model
+  generation_model: "anthropic.claude-3-5-sonnet-20240620-v1:0"
+
+# Qdrant settings
+qdrant:
+  collection_name: "veris_pdfs"
+  vector_size: 1024  # Cohere embed-v4 dimension
+
+# Logging settings
+logging:
+  level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR
+  log_prefix: "rag" # followed by date; log is date-wise
+  console_output: true
