@@ -1,16 +1,36 @@
 # ✅ **Multi-PDF RAG System against Veris Documents**
 
-This system runs on VERIS documents, is implemented under LlamaIndex, with its native support of **AWS Bedrock LLMs/embeddings, Qdrant DB, conversation memory (source code is copied into `utils/memory.py` for more customization), and citation-grounded generation (source code is copied into `utils/citation_query_engine.py.py` for more customization)**.
+This system runs on VERIS documents, is implemented under LlamaIndex, with its native support of 
+* AWS Bedrock LLMs/embeddings,
+* Qdrant DB, 
+* conversation memory (source code is copied into `utils/memory.py` for more customization), and 
+* citation-grounded generation (source code is copied into `utils/citation_query_engine.py.py` for more customization).
 
-The system must support:
+The structure of the repository:
+```
+/documents/
+    requirement_design.md (this file)
+    TODO.md (ignored)
 
-* **Chat interface** (via API)
-* **Citation-grounded responses**
-* **Multi-document summarization**
-* **Cross-document reasoning**
-* **Conversation continuity via memory**
-* **Dynamic retrieval for each query**
+/veris_rag/
+    (put your implmentation of each module)
 
+/utils/
+    citation_query_engine.py
+    memory.py
+
+/script/
+    (for each module in veris_rag, add a simple test script, which should be a naive Python code without testing wrapper or argparse, so that I can run it in an interactive notebook mode)
+
+/app/
+    chat_api.py  (FastAPI or similar)
+
+config.yaml
+
+environment.yaml
+```
+
+The system must support the following capabilities
 ---
 
 # **1. Core Capabilities**
@@ -45,7 +65,6 @@ index = VectorStoreIndex.from_vector_store(vector_store=vector_store)
 ```
 
 ### **1.2 Dynamic RAG**
-
 * Retrieval 
     0. Input from a request: {"PID": "", "user_query": ""} 
     2. perform index-key filtering based on the given "PID"
@@ -106,9 +125,54 @@ Use mem0 integration, [the source code](https://github.com/run-llama/llama_index
 
 # **4. AWS Bedrock Integration**
 
-The system must use AWS Bedrock for both:
+The system must use AWS Bedrock for both. We need to connect to Bedrock under the support of both `aws sso login` and Access Keys 
+* If the following environment variables are empty (which is set in `.env`), rely on `aws sso login`.
+
+AWS_ACCESS_KEY_ID=""
+AWS_SECRET_ACCESS_KEY=""
+AWS_SESSION_TOKEN=""
 
 ### **4.1 LLM generation**
+Example Python code:
+
+```python
+from llama_index.core.llms import ChatMessage
+from llama_index.llms.bedrock import Bedrock
+
+messages = [
+    ChatMessage(
+        role="system", content="You are a pirate with a colorful personality"
+    ),
+    ChatMessage(role="user", content="Tell me a story"),
+]
+
+resp = Bedrock(
+    model="amazon.titan-text-express-v1", profile_name=profile_name
+).chat(messages)
+```
+
+Streaming:
+
+```python
+from llama_index.llms.bedrock import Bedrock
+llm = Bedrock(
+    model="amazon.titan-text-express-v1",
+    aws_access_key_id="AWS Access Key ID to use",
+    aws_secret_access_key="AWS Secret Access Key to use",
+    aws_session_token="AWS Session Token to use",
+    region_name="AWS Region to use, eg. us-east-1",
+)
+# or simply
+llm = Bedrock(model="amazon.titan-text-express-v1", profile_name=profile_name)
+messages = [
+    ChatMessage(
+        role="system", content="You are a pirate with a colorful personality"
+    ),
+    ChatMessage(role="user", content="Tell me a story"),
+]
+resp = llm.stream_chat(messages)
+```
+
 
 ### **4.2 Embedding model via AWS Bedrock**
 
@@ -131,28 +195,53 @@ logging:
   console_output: true
 ```
 
+Example Python code:
+
+```python
+from llama_index.embeddings.bedrock import BedrockEmbedding
+embed_model = BedrockEmbedding(
+    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+    aws_session_token=os.getenv("AWS_SESSION_TOKEN"),
+    region_name="<aws-region>",
+    profile_name="<aws-profile>",
+)
+# or simply
+# model = BedrockEmbedding(model_name="cohere.embed-english-v3")
+coherePayload = ["This is a test document", "This is another test document"]
+
+embed1 = model.get_text_embedding("This is a test document")
+print(embed1)
+
+embeddings = model.get_text_embedding_batch(coherePayload)
+print(embeddings)
+```
+
 ---
 
-# **5. Query Engine Behavior**
+# **5. FastAPI**
 
-For each user query:
+Each user request contains:
+```json
+{
+  "message": "Given the site located at 322 New Street, Brighton 3186, is the site a priority site?",
+  "session_id": "a157"
+}
+```
+`session_id` is used to retrieve the memory.
 
-1. Retrieve relevant chunks from vector store
-2. Gather conversation memory context
-3. Format prompt (RAG + memory + user question)
-4. Call Bedrock LLM
-5. Parse output + attach citation metadata
-6. Return:
 
-   ```json
-   {
-       "answer": "...",
-       "citations": [
-           {"file": "xxx.pdf", "page": 12, "chunk_id": "c_14"},
-           ...
-       ]
-   }
-   ```
+Two endpoints are `/chat/` and `/chat/stream/` (streaming).
 
+```json
+{
+    "response": "...",
+    "session_id": "a157",
+    "citations": [
+        {"file": "xxx.pdf", "page": 12, "chunk_id": "c_14", "url": "xxx"},
+        ...
+    ],
+}
+```
 ---
  
