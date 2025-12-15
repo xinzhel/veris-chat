@@ -77,6 +77,7 @@ try:
     # BedrockConverse is recommended but requires llama-index-llms-bedrock-converse.
     llm = Bedrock(
         model=models_cfg.get("generation_model"),
+        context_size=1000,
         **bedrock_kwargs,
     )
     print("  ✓ Bedrock LLM initialized")

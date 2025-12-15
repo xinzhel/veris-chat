@@ -1,3 +1,15 @@
+# Important and Emergent Tasks
+## Finish Task 2
+* citation footnotes: No need. Fully in-text citation
+* URL link should be inserted in a specific format, determined by Ozzy for rendering 
+
+## Begin Task 3, 4 in requirments_design.md
+
+## Check (Not Systematic Evaluation)
+* time usage of 1) Ingestion; 2) Retrieval; 2) Citation-Grounded Generation; 3) Memory Retrieval
+* the accuracy of references across multiple documents
+
+# Important but Not Emergent Tasks
 ## Agentic RAG
 LLM 决定检索策略、多轮检索： 
 * query 改写 
@@ -16,5 +28,5 @@ Step 5: 输出最终回答
  since Bedrock embeddings are called during session ingestion, ingestion latency becomes part of user interaction. 
 
 ## Caching
- do not re-embed same chunk text if re-attached within a session or other sessions
+do not re-embed same chunk text if re-attached within a session or other sessions
 
