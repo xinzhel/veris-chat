@@ -29,11 +29,9 @@ We are developping an interactive system where, for each **conversation session*
     /veris_chat/ 
         chat/
         ingestion/
-        
-
-    /utils/
-        citation_query_engine.py
-        memory.py
+        utils/
+            citation_query_engine.py
+            memory.py
 
     /script/
         (for each module in veris_rag, add a simple test script, which should be a naive Python code without testing wrapper or argparse, so that I can run it in an interactive notebook mode)

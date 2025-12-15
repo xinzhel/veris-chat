@@ -12,6 +12,16 @@ import sys
 sys.path.insert(0, ".")
 
 from veris_chat.chat.config import load_config
+from veris_chat.utils.logger import setup_logging
+
+# Setup logging with console output to see detailed operations
+setup_logging(
+    run_id="test_ingestion",
+    result_dir="./logs",
+    add_console_handler=True,
+    verbose=True,
+    allowed_namespaces=("veris_chat", "ingestion", "__main__"),
+)
 
 # Load configuration
 print("=" * 60)
@@ -130,6 +140,24 @@ for record in records[:3]:
         raise AssertionError("session_id mismatch")
 
 print(f"  ✓ All records have correct session_id: {TEST_SESSION_ID}")
+
+# -----------------------------------------------------------------------------
+# Test retrieval
+# -----------------------------------------------------------------------------
+print("\n[4/4] Testing retrieval...")
+
+query = "What is the purpose of this document?"
+results = client.retrieve(query, top_k=3)
+
+print(f"  Query: {query}")
+print(f"  Results: {results['num_results']} chunks retrieved")
+
+for i, chunk in enumerate(results["chunks"][:2], 1):
+    print(f"\n  Result {i}:")
+    print(f"    Score: {chunk['score']:.4f}")
+    print(f"    Filename: {chunk['filename']}")
+    print(f"    Page: {chunk['page_number']}")
+    print(f"    Text preview: {chunk['text'][:100]}...")
 
 print("\n" + "=" * 60)
 print("IngestionClient test completed successfully!")

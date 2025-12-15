@@ -80,6 +80,46 @@ DEFAULT_CITATION_CHUNK_SIZE = 512
 DEFAULT_CITATION_CHUNK_OVERLAP = 20
 
 
+def create_session_citation_engine(
+    index: "BaseGPTIndex",
+    llm: Optional[LLM] = None,
+    citation_chunk_size: int = DEFAULT_CITATION_CHUNK_SIZE,
+    similarity_top_k: int = 5,
+    session_id: Optional[str] = None,
+    **kwargs: Any,
+) -> "CitationQueryEngine":
+    """
+    Create a CitationQueryEngine for session-scoped retrieval.
+    
+    Args:
+        index: VectorStoreIndex connected to Qdrant.
+        llm: LLM for response generation. If None, uses Settings.llm.
+        citation_chunk_size: Size of citation chunks for granular sources.
+        similarity_top_k: Number of top results to retrieve.
+        session_id: Session ID for filtering (requires Qdrant filter setup in retriever).
+        **kwargs: Additional kwargs passed to CitationQueryEngine.from_args().
+        
+    Returns:
+        CitationQueryEngine configured for the session.
+        
+    Example:
+        from veris_chat.chat.retriever import get_vector_index
+        from veris_chat.utils.citation_query_engine import create_session_citation_engine
+        
+        index = get_vector_index()
+        engine = create_session_citation_engine(index, similarity_top_k=5)
+        response = engine.query("What is the site status?")
+        citations = extract_source_metadata(response.source_nodes)
+    """
+    return CitationQueryEngine.from_args(
+        index=index,
+        llm=llm,
+        citation_chunk_size=citation_chunk_size,
+        similarity_top_k=similarity_top_k,
+        **kwargs,
+    )
+
+
 class CitationQueryEngine(BaseQueryEngine):
     """
     Citation query engine.

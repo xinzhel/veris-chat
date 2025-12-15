@@ -238,10 +238,6 @@ class IngestionClient:
 
         local_path = info["local_path"]
         filename = info["filename"]
-        
-         # Update JSON cache
-        self.url_cache[url] = local_path
-        self._save_url_cache()
 
         parsed_pages = process_pdf(local_path) or []
         for p in parsed_pages:
@@ -343,6 +339,11 @@ class IngestionClient:
 
         parsed_pages = self._download_parse_pdf(url)
         self._index_document(url, parsed_pages, session_id=session_id)
+        
+        # Update cache only after successful indexing
+        self.url_cache[url] = url
+        self._save_url_cache()
+        logger.info(f"[INGEST] URL cached after successful indexing: {url}")
 
     def retrieve(self, query: str, url: Optional[str] = None, top_k: int = 3) -> Dict[str, Any]:
         """
@@ -375,17 +376,16 @@ class IngestionClient:
 
         query_vec = self.encoder.embed([query])[0]
 
-        results = self.qdrant.search(
+        response = self.qdrant.query_points(
             collection_name=self.collection_name,
-            query_vector=query_vec,
+            query=query_vec,
             query_filter=query_filter,
             limit=top_k,
             with_payload=True,
-            with_vectors=False,
         )
 
         chunks = []
-        for result in results:
+        for result in response.points:
             payload = result.payload or {}
             chunks.append(
                 {
