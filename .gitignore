@@ -1,5 +1,7 @@
 # Environment variables
 .env
+.kiro/
+data/
 
 # Data directories
 data/logs/

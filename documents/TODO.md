@@ -12,3 +12,9 @@ Step 5: 输出最终回答
 
 目前没有开箱即用、完整实现 Agentic RAG Loop 的框架
 
+## Batch embedding
+ since Bedrock embeddings are called during session ingestion, ingestion latency becomes part of user interaction. 
+
+## Caching
+ do not re-embed same chunk text if re-attached within a session or other sessions
+

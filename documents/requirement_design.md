@@ -1,54 +1,98 @@
-# ✅ **Multi-PDF RAG System against Veris Documents**
+# ✅ **Document-Grounded Conversational System**
 
-This system runs on VERIS documents, is implemented under LlamaIndex, with its native support of 
+We are developping an interactive system where, for each **conversation session**, the user supplies a **small set of task-relevant document URLs**. These documents are:
+
+1. downloaded and parsed on-demand,
+2. chunked and embedded on-the-fly,
+3. stored in a **session-scoped ephemeral vector memory**, and
+4. queried repeatedly across multi-turn conversation with **conversation memory + citations**.
+
+
+* Request: Each request includes `session_id`.
+    ```json
+    {
+    "session_id": "a157",
+    "document_urls": ["https://...pdf", "https://...pdf"],
+    "message": "..."
+    }
+    ```
+* The system maintains:
+    * **Session memory** (chat history / mem0-style)
+    * **Session vector store** (documents attached to that session)
+
+* Structure of the repository:
+    ```
+    /documents/
+        requirement_design.md (this file)
+        TODO.md (ignored)
+
+    /veris_chat/ 
+        chat/
+        ingestion/
+        
+
+    /utils/
+        citation_query_engine.py
+        memory.py
+
+    /script/
+        (for each module in veris_rag, add a simple test script, which should be a naive Python code without testing wrapper or argparse, so that I can run it in an interactive notebook mode)
+
+    /app/
+        chat_api.py  (FastAPI or similar)
+
+    config.yaml
+
+    environment.yaml
+    ```
+
+---
+
+Below are the Core Capabilities.
+
+## **1 Session-Attached, Multi-PDF Document Ingestion**
+ If `document_urls` are provided for a session:
+
+* download PDFs (with local cache)
+* parse into per-page text + page_number
+* chunk into retrievable chunks
+* embed chunks
+* store vectors into Qdrant under session scope (collection or payload filter)
+* Required payload metadata per chunk
+    * `session_id`
+    * `url`
+    * `filename`
+    * `page_number`
+    * `chunk_id`
+    * `chunk_index`
+    * `section_header` (optional)
+    * `text`
+This part has been implemented in `veris_chat/ingestion`, exposing `IngestionClient` as the one-stop interface for ingestion.
+
+```python
+from veris_chat.ingestion.main_client import IngestionClient
+# Initialize Client with config settings
+client = IngestionClient(
+    storage_path="./qdrant_local",
+    collection_name=qdrant_cfg["collection_name"],
+    embedding_model=embedding_model,
+    embedding_dim=qdrant_cfg["vector_size"],
+    chunk_size=chunking_cfg["chunk_size"],
+    chunk_overlap=chunking_cfg["overlap"],
+)
+client.store(url)
+```
+
+Note: the ingestion code is independent with the rest below. The rest of system is implemented directly under LlamaIndex without the complicated Python wrapper, specifically including the LlamaIndex support below: 
 * AWS Bedrock LLMs/embeddings,
 * Qdrant DB, 
 * conversation memory (source code is copied into `utils/memory.py` for more customization), and 
 * citation-grounded generation (source code is copied into `utils/citation_query_engine.py.py` for more customization).
 
-The structure of the repository:
-```
-/documents/
-    requirement_design.md (this file)
-    TODO.md (ignored)
+## **2 Retrieval-Augmented Generation**
 
-/veris_rag/
-    (put your implmentation of each module)
-
-/utils/
-    citation_query_engine.py
-    memory.py
-
-/script/
-    (for each module in veris_rag, add a simple test script, which should be a naive Python code without testing wrapper or argparse, so that I can run it in an interactive notebook mode)
-
-/app/
-    chat_api.py  (FastAPI or similar)
-
-config.yaml
-
-environment.yaml
-```
-
-The system must support the following capabilities
----
-
-# **1. Core Capabilities**
-
-### **1.1 Multi-PDF Document Ingestion**
-
-* The system must load **multiple PDF documents** from a directory.
-* Each PDF should be parsed into text, chunked, and embedded.
-* Metadata must include:
-
-  * filename
-  * page number
-  * chunk ID
-  * optional section header (if extractable)
-
-(I have ingested the PDF documents onto VectorDB, which can be accessed via QDRANT_URL, QDRANT_API_KEY )
-
-This part can fit in llamaindex interface as VectoStoreIndex, as shown below
+### **2.1 Retrieval**
+Re-connect to Qdrant VectorDB via llamaindex interface as VectoStoreIndex, as shown below
 ```python
 from llama_index.core.indices.vector_store.base import VectorStoreIndex
 from llama_index.vector_stores.qdrant import QdrantVectorStore
@@ -64,23 +108,20 @@ vector_store = QdrantVectorStore(client=client, collection_name="documents")
 index = VectorStoreIndex.from_vector_store(vector_store=vector_store)
 ```
 
-### **1.2 Dynamic RAG**
-* Retrieval 
-    0. Input from a request: {"PID": "", "user_query": ""} 
-    2. perform index-key filtering based on the given "PID"
-    3. perform semantic search (vector-similarity) **dynamically**. The system must retrieve top-K relevant chunks attached to the given "PID".
-* LLM genration
-    0. Input: Query + Retrieved chunks must be injected into the LLM prompt 
-    1. RAG must support long-form queries that require reasoning across multiple documents.
+* Retrieval --- For each query request:
+    1. Determine the session’s vector memory:
+        * index-key filtering based on a filter `session_id == session_id`
+    2. Perform semantic search (top-K)
+    3. Return chunks + payload metadata
 
----
+### **2.2 LLM Genration**
 
-# **2. Citation-Grounded Generation (NotebookLM-Style)**
+Inject:
+    * conversation memory context (session-scoped): see Section 4. Conversation Memory for detail.
+    * retrieved chunks (session-scoped)
+    * user query
 
-Responses **must include citations** referencing the source documents.
-
-Requirements:
-
+Requiring **Citation-Grounded Generation**, i.e., Responses **must include citations** referencing the source documents.
 * Each answer must reference the PDFs used during reasoning. Citations must be generated from metadata (the payload of each chunck)
   * `filename`
   * `page_number`
@@ -91,90 +132,17 @@ Requirements:
 * Must support multiple citation formats (inline / bracket / footnotes), but default is inline.
 * The system must expose the full set of source nodes used for each answer.
 
-```python
-query_engine = CitationQueryEngine.from_args(
-    index,
-    similarity_top_k=3,
-    # here we can control how granular citation sources are, the default is 512
-    citation_chunk_size=512,
-)
-You may need to modify the source code at 
-```
-
-
-[the source code](https://github.com/run-llama/llama_index/blob/main/llama-index-core/llama_index/core/query_engine/citation_query_engine.py) has been copied to the local module: `utils/citation_query_engine.py` for easy import and customization
-
----
-
-# **3. Conversation Memory**
-
-The system must support **conversation memory** alongside retrieval:
-
-Use mem0 integration, [the source code](https://github.com/run-llama/llama_index/blob/main/llama-index-integrations/memory/llama-index-memory-mem0/llama_index/memory/mem0/base.py) has been copied to the local module: `utils/memory.py` for easy import and customization.
-
-### Behavior:
-
-* The memory content must be injected into the LLM prompt for each new query.
-* Memory must **coexist** with RAG retrieval:
-
-  ```
-  prompt = memory_context + retrieved_chunks + user_query
-  ```
-
----
-
-# **4. AWS Bedrock Integration**
-
-The system must use AWS Bedrock for both. We need to connect to Bedrock under the support of both `aws sso login` and Access Keys 
-* If the following environment variables are empty (which is set in `.env`), rely on `aws sso login`.
+### **2.3 AWS Bedrock Integration under LlamaIndex**
+ We need to connect to Bedrock under the support of both `aws sso login` and Access Keys. If the following environment variables are empty (which is set in `.env`), rely on `aws sso login`.
 
 AWS_ACCESS_KEY_ID=""
 AWS_SECRET_ACCESS_KEY=""
 AWS_SESSION_TOKEN=""
 
-### **4.1 LLM generation**
-Example Python code:
-
-```python
-from llama_index.core.llms import ChatMessage
-from llama_index.llms.bedrock import Bedrock
-
-messages = [
-    ChatMessage(
-        role="system", content="You are a pirate with a colorful personality"
-    ),
-    ChatMessage(role="user", content="Tell me a story"),
-]
-
-resp = Bedrock(
-    model="amazon.titan-text-express-v1", profile_name=profile_name
-).chat(messages)
-```
-
-Streaming:
-
-```python
-from llama_index.llms.bedrock import Bedrock
-llm = Bedrock(
-    model="amazon.titan-text-express-v1",
-    aws_access_key_id="AWS Access Key ID to use",
-    aws_secret_access_key="AWS Secret Access Key to use",
-    aws_session_token="AWS Session Token to use",
-    region_name="AWS Region to use, eg. us-east-1",
-)
-# or simply
-llm = Bedrock(model="amazon.titan-text-express-v1", profile_name=profile_name)
-messages = [
-    ChatMessage(
-        role="system", content="You are a pirate with a colorful personality"
-    ),
-    ChatMessage(role="user", content="Tell me a story"),
-]
-resp = llm.stream_chat(messages)
-```
+NOTE: In `veris_chat/chat`, reduce wrapper functions like get_llm(), get_embed_model(), get_qdrant_client() since LlamaIndex already provides native support for these components 
 
 
-### **4.2 Embedding model via AWS Bedrock**
+#### **2.3.1 Embedding model via AWS Bedrock**
 
 See the config.yaml. Below is the content of initial config.yaml:
 ```yaml
@@ -217,17 +185,94 @@ embeddings = model.get_text_embedding_batch(coherePayload)
 print(embeddings)
 ```
 
+#### **2.3.2 LLM Genration*x**
+
+Example Python code:
+
+```python
+from llama_index.core.llms import ChatMessage
+from llama_index.llms.bedrock import Bedrock
+
+messages = [
+    ChatMessage(
+        role="system", content="You are a pirate with a colorful personality"
+    ),
+    ChatMessage(role="user", content="Tell me a story"),
+]
+
+resp = Bedrock(
+    model="amazon.titan-text-express-v1", profile_name=profile_name
+).chat(messages)
+```
+
+Streaming:
+
+```python
+from llama_index.llms.bedrock import Bedrock
+llm = Bedrock(
+    model="amazon.titan-text-express-v1",
+    aws_access_key_id="AWS Access Key ID to use",
+    aws_secret_access_key="AWS Secret Access Key to use",
+    aws_session_token="AWS Session Token to use",
+    region_name="AWS Region to use, eg. us-east-1",
+)
+# or simply
+llm = Bedrock(model="amazon.titan-text-express-v1", profile_name=profile_name)
+messages = [
+    ChatMessage(
+        role="system", content="You are a pirate with a colorful personality"
+    ),
+    ChatMessage(role="user", content="Tell me a story"),
+]
+resp = llm.stream_chat(messages)
+```
+
+#### **2.3.3 Citation-Grounded Generation**
+```python
+query_engine = CitationQueryEngine.from_args(
+    index,
+    similarity_top_k=3,
+    # here we can control how granular citation sources are, the default is 512
+    citation_chunk_size=512,
+)
+```
+
+**Note**: the QueryEngine must be constructed from the **session’s index**.
+
+You may need to modify the source code at [the source code](https://github.com/run-llama/llama_index/blob/main/llama-index-core/llama_index/core/query_engine/citation_query_engine.py) has been copied to the local module: `utils/citation_query_engine.py` for easy import and customization
 ---
 
-# **5. FastAPI**
+# **3. Conversation Memory**
+
+The system must support **conversation memory** alongside retrieval:
+
+Use mem0 integration, [the source code](https://github.com/run-llama/llama_index/blob/main/llama-index-integrations/memory/llama-index-memory-mem0/llama_index/memory/mem0/base.py) has been copied to the local module: `utils/memory.py` for easy import and customization.
+
+### Behavior:
+
+* memory store is session-keyed
+* memory is persisted via Qdrant
+* memory content must be injected into the LLM prompt for each new query, along with retrieved context:
+  ```
+  prompt = memory_context + retrieved_chunks + user_query
+  ```
+
+---
+
+# **4. FastAPI**
 
 Each user request contains:
 ```json
 {
   "message": "Given the site located at 322 New Street, Brighton 3186, is the site a priority site?",
-  "session_id": "a157"
+  "session_id": "a157",
+  "document_urls": [
+    "https://.../doc1.pdf",
+    "https://.../doc2.pdf"
+  ]
 }
 ```
+
 `session_id` is used to retrieve the memory.
 
 

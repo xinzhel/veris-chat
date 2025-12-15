@@ -11,5 +11,37 @@ qdrant:
 # Logging settings
 logging:
   level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR
-  log_prefix: "rag" # followed by date; log is date-wise
+  log_prefix: "chat" # followed by date; log is date-wise
   console_output: true
+
+
+# PDF Vector Ingestion Configuration
+
+# Chunking settings
+chunking:
+  chunk_size: 512  # Default chunk size in characters
+  strategy: "paragraph"  # Options: paragraph, page, adaptive
+  overlap: 50  # Character overlap between chunks
+
+# Qdrant settings
+qdrant:
+  collection_name: "veris_pdfs"
+  vector_size: 1024  # Cohere embed-v4 dimension
+
+  
+# File paths
+paths:
+  csv_data: "data/csv/"
+  pdfs: "data/pdfs/"
+  parsed: "data/parsed/"
+  chunks: "data/chunks/"
+  embeddings: "data/embeddings/"
+
+# PDF parsing settings
+pdf_parsing:
+  strip_headers: true
+  strip_footers: true
+  extract_metadata: true
+
+
+
