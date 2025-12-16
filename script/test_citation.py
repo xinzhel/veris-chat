@@ -21,17 +21,17 @@ from veris_chat.chat.config import load_config, get_bedrock_kwargs
 from veris_chat.utils.logger import setup_logging
 
 # Setup logging
-setup_logging(
+logger = setup_logging(
     run_id="test_citation",
     result_dir="./logs",
     add_console_handler=True,
     verbose=True,
     allowed_namespaces=("veris_chat", "__main__"),
 )
+logger.info("\n\n")
 
-# Get logger for timing
+# Get logger
 timing_logger = logging.getLogger("veris_chat.timing")
-
 # Timing results storage
 timing_results = {}
 
@@ -48,9 +48,9 @@ config = load_config()
 models_cfg = config["models"]
 qdrant_cfg = config["qdrant"]
 
-print(f"  Embedding model: {models_cfg.get('embedding_model')}")
-print(f"  Generation model: {models_cfg.get('generation_model')}")
-print(f"  Collection name: {qdrant_cfg.get('collection_name')}")
+logger.info(f"Embedding model: {models_cfg.get('embedding_model')}")
+logger.info(f"Generation model: {models_cfg.get('generation_model')}")
+logger.info(f"Collection name: {qdrant_cfg.get('collection_name')}")
 
 # Test constants (must match test_ingestion.py)
 TEST_COLLECTION = "veris_pdfs_test"
@@ -109,56 +109,25 @@ print(f"  ⏱ Index creation time: {timing_results['index_creation']:.3f}s")
 # -----------------------------------------------------------------------------
 print("\n[3/6] Creating CitationQueryEngine...")
 
-from veris_chat.utils.citation_query_engine import (
-    CitationQueryEngine,
-    create_session_citation_engine,
-)
+from veris_chat.utils.citation_query_engine import CitationQueryEngine
 from veris_chat.chat.retriever import retrieve_nodes_metadata
 
-# Method 1: Using helper function
-engine = create_session_citation_engine(
+engine = CitationQueryEngine.from_args(
     index=index,
     llm=llm,
     citation_chunk_size=512,
     similarity_top_k=5,
 )
-print("  ✓ CitationQueryEngine created via create_session_citation_engine()")
-
-# Method 2: Direct from_args (alternative)
-engine_direct = CitationQueryEngine.from_args(
-    index=index,
-    llm=llm,
-    citation_chunk_size=512,
-    similarity_top_k=5,
-)
+logger.info(f"CitationQueryEngine._response_synthesizer: {type(engine._response_synthesizer)}")
 print("  ✓ CitationQueryEngine created via from_args() directly")
 
 # -----------------------------------------------------------------------------
-# Measure Retrieval separately
+# Query with citations (Citation-Grounded Generation with timing breakdown)
 # -----------------------------------------------------------------------------
-print("\n[4/6] Measuring Retrieval time separately...")
-
-from veris_chat.chat.retriever import retrieve_with_session_filter
+print("\n[4/6] Querying with CitationQueryEngine...")
 
 query = "What is the purpose of this document?"
 print(f"  Query: {query}")
-
-# Time retrieval only
-t_retrieval_start = time.perf_counter()
-retrieved_nodes = retrieve_with_session_filter(
-    index=index,
-    query=query,
-    session_id=TEST_SESSION_ID,
-    top_k=5,
-)
-timing_results["retrieval"] = time.perf_counter() - t_retrieval_start
-print(f"  ✓ Retrieved {len(retrieved_nodes)} nodes")
-print(f"  ⏱ Retrieval time: {timing_results['retrieval']:.3f}s")
-
-# -----------------------------------------------------------------------------
-# Query with citations (Citation-Grounded Generation)
-# -----------------------------------------------------------------------------
-print("\n[5/7] Querying with CitationQueryEngine (Generation)...")
 
 try:
     # Time the full query (retrieval + generation)
@@ -166,21 +135,25 @@ try:
     response = engine.query(query)
     timing_results["citation_query_total"] = time.perf_counter() - t_query_start
     
-    # Estimate generation time (total - retrieval)
-    timing_results["generation"] = max(0, timing_results["citation_query_total"] - timing_results["retrieval"])
+    # Get detailed timing from engine (retrieval vs generation breakdown)
+    engine_timing = engine.get_last_timing()
+    if engine_timing:
+        timing_results["engine_retrieval"] = engine_timing.get("retrieval_time", 0)
+        timing_results["engine_generation"] = engine_timing.get("generation_time", 0)
     
     print("  ✓ Query completed successfully")
     print(f"  ⏱ Citation query total time: {timing_results['citation_query_total']:.3f}s")
-    print(f"  ⏱ Estimated generation time: {timing_results['generation']:.3f}s")
     
-    print(f"\n  Response:")
-    print(f"  {'-' * 50}")
+    # Show detailed breakdown from engine
+    if engine_timing:
+        print(f"  ⏱ Engine breakdown:")
+        print(f"      Retrieval (semantic search): {timing_results['engine_retrieval']:.3f}s")
+        print(f"      Generation (LLM): {timing_results['engine_generation']:.3f}s")
+    
+    logger.info(f"\n  Response:")
+    logger.info(f"  {'-' * 50}")
     response_text = str(response)
-    # Truncate long responses for display
-    if len(response_text) > 500:
-        print(f"  {response_text}...")
-    else:
-        print(f"  {response_text}")
+    logger.info(f"  {response_text}")
     print(f"  {'-' * 50}")
     
     # Extract source nodes
@@ -191,12 +164,13 @@ except Exception as e:
     print(f"  ✗ Query failed: {e}")
     source_nodes = []
     timing_results["citation_query_total"] = 0
-    timing_results["generation"] = 0
+    timing_results["engine_retrieval"] = 0
+    timing_results["engine_generation"] = 0
 
 # -----------------------------------------------------------------------------
 # Extract source metadata
 # -----------------------------------------------------------------------------
-print("\n[6/7] Extracting source metadata...")
+print("\n[5/6] Extracting source metadata...")
 
 if source_nodes:
     citations = retrieve_nodes_metadata(source_nodes)
@@ -217,7 +191,7 @@ else:
 # -----------------------------------------------------------------------------
 # Test citation formatting functions
 # -----------------------------------------------------------------------------
-print("\n[7/7] Testing citation formatting functions...")
+print("\n[6/6] Testing citation formatting functions...")
 
 from veris_chat.chat.retriever import (
     format_citations,
@@ -225,32 +199,13 @@ from veris_chat.chat.retriever import (
 )
 
 if citations:
-    # Test inline style
-    inline_citations = format_citations(citations, style="inline")
-    print(f"\n  Inline style ({len(inline_citations)} citations):")
-    for c in inline_citations[:2]:
-        print(f"    {c}")
-    
-    # Test bracket style
-    bracket_citations = format_citations(citations, style="bracket")
-    print(f"\n  Bracket style ({len(bracket_citations)} citations):")
-    for c in bracket_citations[:2]:
-        print(f"    {c}")
-    
-    # Test footnote style
-    footnote_citations = format_citations(citations, style="footnote")
-    print(f"\n  Footnote style ({len(footnote_citations)} citations):")
-    for c in footnote_citations[:2]:
-        print(f"    {c}")
-    
     # Test format_citations_for_response
-    response_data = format_citations_for_response(citations, style="inline")
-    print(f"\n  format_citations_for_response output:")
-    print(f"    citations: {len(response_data['citations'])} items")
-    print(f"    sources: {len(response_data['sources'])} items")
-    if response_data['sources']:
-        first_source = response_data['sources'][0]
-        print(f"    First source: file={first_source.get('file')}, page={first_source.get('page')}")
+    response_data = format_citations_for_response(citations, style="footnote")
+    # if response_data['sources']:
+    #     first_source = response_data['sources'][0]
+    #     logger.info(f" First source: file={first_source.get('file')}, page={first_source.get('page')}")
+    for formatted_citation in response_data['citations']:
+        logger.info(formatted_citation)
     
     print("\n  ✓ All citation formatting tests passed")
 else:
@@ -280,18 +235,19 @@ if "index_creation" in timing_results:
     print(f"  {msg}")
     timing_logger.info(msg)
 
-if "retrieval" in timing_results:
-    msg = f"2) Retrieval: {timing_results['retrieval']:.3f}s"
+# Use engine timing for accurate retrieval/generation breakdown
+if "engine_retrieval" in timing_results:
+    msg = f"2) Retrieval (semantic search): {timing_results['engine_retrieval']:.3f}s"
     print(f"  {msg}")
     timing_logger.info(msg)
 
-if "generation" in timing_results:
-    msg = f"3) Citation-Grounded Generation: {timing_results['generation']:.3f}s"
+if "engine_generation" in timing_results:
+    msg = f"3) Citation-Grounded Generation (LLM): {timing_results['engine_generation']:.3f}s"
     print(f"  {msg}")
     timing_logger.info(msg)
 
 if "citation_query_total" in timing_results:
-    msg = f"   (Citation Query Total = Retrieval + Generation): {timing_results['citation_query_total']:.3f}s"
+    msg = f"   (Citation Query Total): {timing_results['citation_query_total']:.3f}s"
     print(f"  {msg}")
     timing_logger.info(msg)
 
