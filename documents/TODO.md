@@ -1,4 +1,18 @@
 # Important and Emergent Tasks
+
+## Chat Service Memory Integration
+* `CitationQueryEngine.query()` only accepts query string, not chat message list
+* `memory.get()` returns system message + chat history, but only memory context is prepended to query string
+* Full chat history structure is lost when calling engine.query()
+* Current workaround in `service.py`:
+  ```python
+  # memory.get() returns [SystemMessage, ...chat_history]
+  messages_with_context = memory.get(input=message)
+  memory_context = messages_with_context[0].content  # Extract system message only
+  query_text = f"Context from previous conversations:\n{memory_context}\n\nCurrent question: {message}"
+  response = engine.query(query_text)  # Chat history lost here
+  ```
+* Options: (1) Modify CitationQueryEngine to accept system prompt, or (2) Use LLM chat directly with full message history
 ## Finish Task 2
 * citation footnotes: No need. Fully in-text citation
 * URL link should be inserted in a specific format, determined by Ozzy for rendering 
