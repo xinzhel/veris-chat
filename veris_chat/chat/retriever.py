@@ -264,13 +264,14 @@ def retrieve_for_session(
 
 def format_citations(
     source_nodes: List[dict],
-    style: str = "inline",
+    style: str = "markdown_link",
 ) -> List[str]:
     """
     Format citation metadata into human-readable citation strings.
     
-    Supports three citation styles:
-    - inline: "... as noted in filename.pdf (p. 12)."
+    Supports four citation styles:
+    - markdown_link (default): "[filename (p.X)](url)" - clickable markdown links
+    - inline: "as noted in filename.pdf (p. 12)"
     - bracket: "[filename.pdf, p. 12]"
     - footnote: "[1] filename.pdf, page 12, chunk 5"
     
@@ -278,13 +279,18 @@ def format_citations(
         source_nodes: List of dicts with citation metadata (from retrieve_nodes_metadata 
                       or extract_source_metadata). Expected keys: filename, page_number, 
                       url, chunk_index, chunk_id.
-        style: Citation style - "inline", "bracket", or "footnote".
+        style: Citation style - "markdown_link", "inline", "bracket", or "footnote".
         
     Returns:
         List of formatted citation strings.
         
     Example:
         results = retrieve_for_session(query="...", session_id="a157")
+        
+        # Markdown links (default) - clickable in frontend
+        citations = format_citations(results, style="markdown_link")
+        # ['[OL000071228.pdf (p.1)](https://...)', '[OL000073004.pdf (p.2)](https://...)']
+        
         citations = format_citations(results, style="inline")
         # ['as noted in OL000071228.pdf (p. 1)', 'as noted in OL000073004.pdf (p. 2)']
         
@@ -300,17 +306,27 @@ def format_citations(
     for i, node in enumerate(source_nodes, start=1):
         filename = node.get("filename", "unknown")
         page = node.get("page_number", "?")
+        url = node.get("url", "")
         chunk_idx = node.get("chunk_index", node.get("chunk_id", "?"))
         
-        if style == "inline":
+        if style == "markdown_link":
+            # Clickable markdown link: [filename (p.X)](url)
+            if url:
+                citation = f"[{filename} (p.{page})]({url})"
+            else:
+                citation = f"[{filename} (p.{page})]"
+        elif style == "inline":
             citation = f"as noted in {filename} (p. {page})"
         elif style == "bracket":
             citation = f"[{filename}, p. {page}]"
         elif style == "footnote":
             citation = f"[{i}] {filename}, page {page}, chunk {chunk_idx}"
         else:
-            logger.warning(f"[RETRIEVER] Unknown citation style '{style}', defaulting to inline")
-            citation = f"as noted in {filename} (p. {page})"
+            logger.warning(f"[RETRIEVER] Unknown citation style '{style}', defaulting to markdown_link")
+            if url:
+                citation = f"[{filename} (p.{page})]({url})"
+            else:
+                citation = f"[{filename} (p.{page})]"
         
         formatted.append(citation)
     
@@ -320,37 +336,57 @@ def format_citations(
 
 def format_citations_for_response(
     source_nodes: List[dict],
-    style: str = "inline",
+    style: str = "markdown_link",
 ) -> dict:
     """
     Format citations for API response, including both formatted strings and raw metadata.
     
     Args:
         source_nodes: List of dicts with citation metadata.
-        style: Citation style - "inline", "bracket", or "footnote".
+        style: Citation style - "markdown_link" (default), "inline", "bracket", or "footnote".
         
     Returns:
         Dict with:
         - citations: List of formatted citation strings
-        - sources: List of raw source metadata dicts (file, page, chunk_id, url)
+        - sources: List of raw source metadata dicts (file, page, chunk_id, url, markdown_link)
         
     Example:
         results = retrieve_for_session(query="...", session_id="a157")
-        citation_data = format_citations_for_response(results, style="inline")
+        citation_data = format_citations_for_response(results, style="markdown_link")
         # {
-        #     "citations": ["as noted in doc.pdf (p. 1)", ...],
-        #     "sources": [{"file": "doc.pdf", "page": 1, "chunk_id": "c_0", "url": "..."}, ...]
+        #     "citations": ["[doc.pdf (p.1)](https://...)", ...],
+        #     "sources": [
+        #         {
+        #             "file": "doc.pdf", 
+        #             "page": 1, 
+        #             "chunk_id": "c_0", 
+        #             "url": "https://...",
+        #             "markdown_link": "[doc.pdf (p.1)](https://...)"
+        #         }, 
+        #         ...
+        #     ]
         # }
     """
     formatted = format_citations(source_nodes, style=style)
     
     sources = []
     for node in source_nodes:
+        filename = node.get("filename", "unknown")
+        page = node.get("page_number", "?")
+        url = node.get("url", "")
+        
+        # Always include markdown_link for frontend convenience
+        if url:
+            markdown_link = f"[{filename} (p.{page})]({url})"
+        else:
+            markdown_link = f"[{filename} (p.{page})]"
+        
         sources.append({
-            "file": node.get("filename"),
-            "page": node.get("page_number"),
+            "file": filename,
+            "page": page,
             "chunk_id": node.get("chunk_id"),
-            "url": node.get("url"),
+            "url": url,
+            "markdown_link": markdown_link,
         })
     
     return {

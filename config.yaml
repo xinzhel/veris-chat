@@ -22,12 +22,6 @@ chunking:
   chunk_size: 512  # Default chunk size in characters
   strategy: "paragraph"  # Options: paragraph, page, adaptive
   overlap: 50  # Character overlap between chunks
-
-# Qdrant settings
-qdrant:
-  collection_name: "veris_pdfs"
-  vector_size: 1024  # Cohere embed-v4 dimension
-
   
 # File paths
 paths:

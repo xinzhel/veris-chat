@@ -29,27 +29,42 @@ from llama_index.core.schema import (
 )
 from llama_index.core.settings import Settings
 
-COMMON_TEMPLATE_STR = (
+# =============================================================================
+# IN-TEXT CITATION WITH MARKDOWN LINKS
+# =============================================================================
+# Instead of numbered citations like [1], [2] that require a separate reference
+# list, we use inline markdown links that can be directly clicked in the frontend.
+#
+# Format: [Document Name (p.X)](url)
+# Example: "The site is classified as priority [OL000071228.pdf (p.2)](https://...)"
+#
+# This approach:
+# 1. Provides immediate context (document name + page number)
+# 2. Allows direct navigation via clickable links
+# 3. Works with standard markdown renderers (React-Markdown, etc.)
+# 4. No need for a separate reference list at the end
+# =============================================================================
+
+CITATION_QA_TEMPLATE = PromptTemplate(
     "Please provide an answer based solely on the provided sources. "
-    "When referencing information from a source, "
-    "cite the appropriate source(s) using their corresponding numbers. "
+    "When referencing information from a source, cite it using the EXACT markdown link format provided with each source. "
     "Every answer should include at least one source citation. "
     "Only cite a source when you are explicitly referencing it. "
     "If none of the sources are helpful, you should indicate that. "
+    "\n\n"
+    "IMPORTANT: Use the citation link EXACTLY as provided (do not modify the URL or format).\n"
+    "\n"
     "For example:\n"
-    "Source 1:\n"
-    "The sky is red in the evening and blue in the morning.\n"
-    "Source 2:\n"
-    "Water is wet when the sky is red.\n"
+    "Source: [weather_report.pdf (p.1)](https://example.com/weather.pdf)\n"
+    "The sky is red in the evening and blue in the morning.\n\n"
+    "Source: [science_facts.pdf (p.3)](https://example.com/science.pdf)\n"
+    "Water is wet when the sky is red.\n\n"
     "Query: When is water wet?\n"
-    "Answer: Water will be wet when the sky is red [2], "
-    "which occurs in the evening [1].\n"
-    "Now it's your turn. "
-)
-CITATION_QA_TEMPLATE = PromptTemplate(
-    COMMON_TEMPLATE_STR+
-    "Below are several numbered sources of information:"
-    "\n------\n"
+    "Answer: Water will be wet when the sky is red [science_facts.pdf (p.3)](https://example.com/science.pdf), "
+    "which occurs in the evening [weather_report.pdf (p.1)](https://example.com/weather.pdf).\n"
+    "\n"
+    "Now it's your turn. Below are the sources of information:\n"
+    "------\n"
     "{context_str}"
     "\n------\n"
     "Query: {query_str}\n"
@@ -57,13 +72,20 @@ CITATION_QA_TEMPLATE = PromptTemplate(
 )
 
 CITATION_REFINE_TEMPLATE = PromptTemplate(
-    COMMON_TEMPLATE_STR+
-    "We have provided an existing answer: {existing_answer}"
-    "Below are several numbered sources of information. "
+    "Please provide an answer based solely on the provided sources. "
+    "When referencing information from a source, cite it using the EXACT markdown link format provided with each source. "
+    "Every answer should include at least one source citation. "
+    "Only cite a source when you are explicitly referencing it. "
+    "If none of the sources are helpful, you should indicate that. "
+    "\n\n"
+    "IMPORTANT: Use the citation link EXACTLY as provided (do not modify the URL or format).\n"
+    "\n"
+    "We have provided an existing answer: {existing_answer}\n"
+    "Below are additional sources of information. "
     "Use them to refine the existing answer. "
     "If the provided sources are not helpful, you will repeat the existing answer."
-    "\nBegin refining!"
-    "\n------\n"
+    "\nBegin refining!\n"
+    "------\n"
     "{context_msg}"
     "\n------\n"
     "Query: {query_str}\n"
@@ -283,15 +305,42 @@ class CitationQueryEngine(BaseQueryEngine):
         return {"response_synthesizer": self._response_synthesizer}
 
     def _create_citation_nodes(self, nodes: List[NodeWithScore]) -> List[NodeWithScore]:
-        """Modify retrieved nodes to be granular sources."""
+        """
+        Modify retrieved nodes to be granular sources with markdown citation links.
+        
+        Each source is formatted with a clickable markdown link that includes:
+        - Document filename
+        - Page number
+        - Full URL for direct navigation
+        
+        Format: Source: [filename (p.X)](url)
+        
+        This allows the LLM to copy the exact citation format into its response,
+        creating clickable links in the frontend without post-processing.
+        """
         new_nodes: List[NodeWithScore] = []
         for node in nodes:
+            metadata = node.node.metadata or {}
+            
+            # Extract citation metadata
+            filename = metadata.get("filename", "document")
+            page_number = metadata.get("page_number", "?")
+            url = metadata.get("url", "")
+            
+            # Create markdown citation link: [filename (p.X)](url)
+            if url:
+                citation_link = f"[{filename} (p.{page_number})]({url})"
+            else:
+                # Fallback if no URL available
+                citation_link = f"[{filename} (p.{page_number})]"
+            
             text_chunks = self.text_splitter.split_text(
                 node.node.get_content(metadata_mode=self._metadata_mode)
             )
 
             for text_chunk in text_chunks:
-                text = f"Source {len(new_nodes) + 1}:\n{text_chunk}\n"
+                # Format: Source: [citation_link]\n{content}
+                text = f"Source: {citation_link}\n{text_chunk}\n"
 
                 new_node = NodeWithScore(
                     node=TextNode.model_validate(node.node.model_dump()),
