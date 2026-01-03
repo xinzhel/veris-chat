@@ -2,6 +2,7 @@
 .env
 .kiro/
 data/
+qdrant*/
 
 # Data directories
 data/logs/

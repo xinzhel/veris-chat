@@ -10,6 +10,54 @@ DEFAULT_OUTRO_PREFERENCES = "This is the end of the retrieved preferences."
 def convert_memory_to_system_message(
     response: List[Dict[str, Any]], existing_system_message: ChatMessage = None
 ) -> ChatMessage:
+    """
+    Convert Mem0 search results into a system message for LLM context injection.
+    
+    Takes memories retrieved from Mem0's vector store and formats them into a
+    system message that can be prepended to the chat history, giving the LLM
+    access to relevant long-term context.
+    
+    Args:
+        response: List of memory dicts from Mem0 search. Each dict contains:
+            - "memory": The extracted fact/preference string
+            - "categories": Optional list of category tags
+            Example:
+            [
+                {"memory": "User's name is Alice", "categories": ["personal"]},
+                {"memory": "User prefers sci-fi movies", "categories": ["preferences"]},
+                {"memory": "User is working on the VERIS project"}
+            ]
+        existing_system_message: Optional existing system message to append to.
+            If provided, memories are appended after the existing content.
+            
+    Returns:
+        ChatMessage with role=SYSTEM containing formatted memories.
+        
+    Example:
+        >>> memories = [
+        ...     {"memory": "User's name is Alice", "categories": ["personal"]},
+        ...     {"memory": "User prefers detailed explanations"}
+        ... ]
+        >>> msg = convert_memory_to_system_message(memories)
+        >>> print(msg.content)
+        
+        Below are a set of relevant preferences retrieved from potentially several memory sources:
+        
+         [personal] : User's name is Alice 
+        
+         User prefers detailed explanations 
+        
+        This is the end of the retrieved preferences.
+        
+        # With existing system message:
+        >>> existing = ChatMessage(content="You are a helpful assistant.", role=MessageRole.SYSTEM)
+        >>> msg = convert_memory_to_system_message(memories, existing)
+        >>> print(msg.content)
+        You are a helpful assistant.
+        
+        Below are a set of relevant preferences retrieved from potentially several memory sources:
+        ...
+    """
     memories = [format_memory_json(memory_json) for memory_json in response]
     formatted_messages = "\n\n" + DEFAULT_INTRO_PREFERENCES + "\n"
     for memory in memories:
@@ -124,9 +172,38 @@ class Mem0Context(BaseModel):
 
 
 class Mem0Memory(BaseMem0):
+    """
+    Hybrid memory combining LlamaIndex's in-session chat history with Mem0's long-term memory.
+    
+    This class implements a dual-memory architecture:
+    
+    1. **primary_memory** (LlamaIndexMemory): Stores the current session's chat history
+       in-memory. This is the immediate, ephemeral conversation buffer that holds
+       user/assistant message exchanges for the active session. It provides fast
+       access to recent messages without external storage lookups.
+       
+    2. **_client** (Mem0 Memory/MemoryClient): Long-term semantic memory that persists
+       across sessions. Mem0 extracts and stores key facts, preferences, and context
+       from conversations, enabling recall of relevant information in future sessions.
+    
+    The `get()` method combines both memory sources:
+    - Retrieves chat history from primary_memory (current session messages)
+    - Searches Mem0's long-term memory for relevant past context using recent messages as query
+    - Injects retrieved long-term memories as a system message prefix
+    - Returns the combined message list ready for LLM consumption
+    
+    This architecture enables:
+    - Fast access to current conversation (primary_memory)
+    - Semantic search over historical context (Mem0)
+    - Session isolation via Mem0Context (user_id/agent_id/run_id)
+    """
     model_config = ConfigDict(arbitrary_types_allowed=True)
     primary_memory: SerializeAsAny[LlamaIndexMemory] = Field(
-        description="Primary memory source for chat agent."
+        description=(
+            "In-session chat history buffer (LlamaIndex Memory). "
+            "Stores current conversation's user/assistant messages in-memory for fast access. "
+            "Used by get() to retrieve recent messages and by put()/set() to store new messages."
+        )
     )
     context: Optional[Mem0Context] = None
     search_msg_limit: int = Field(
@@ -214,7 +291,36 @@ class Mem0Memory(BaseMem0):
         )
 
     def get(self, input: Optional[str] = None, **kwargs: Any) -> List[ChatMessage]:
-        """Get chat history. With memory system message."""
+        """
+        Get chat history augmented with long-term memory context.
+        
+        This method combines two memory sources to build a context-rich message list:
+        
+        1. **primary_memory.get()**: Retrieves the current session's chat history
+           (user/assistant messages stored in-memory). This gives us the immediate
+           conversation context.
+           
+        2. **Mem0 search**: Uses recent messages (limited by search_msg_limit) plus
+           the current input as a query to search Mem0's long-term memory for
+           relevant historical context (facts, preferences, prior discussions).
+           
+        3. **System message injection**: Retrieved long-term memories are formatted
+           and prepended as a system message, giving the LLM access to relevant
+           historical context alongside the current conversation.
+        
+        Args:
+            input: Optional current user input to include in memory search query.
+            **kwargs: Additional arguments passed to primary_memory.get().
+            
+        Returns:
+            List[ChatMessage]: Messages in order [system_message_with_memories, ...chat_history]
+            ready for LLM consumption.
+            
+        Example:
+            # User asks a follow-up question
+            messages = memory.get(input="What was the site address again?")
+            # Returns: [SystemMessage with relevant memories, ...previous chat messages]
+        """
         messages = self.primary_memory.get(input=input, **kwargs)
         input = convert_messages_to_string(messages, input, limit=self.search_msg_limit)
 

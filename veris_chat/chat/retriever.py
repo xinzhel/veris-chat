@@ -334,6 +334,132 @@ def format_citations(
     return formatted
 
 
+def get_session_memory(
+    session_id: str,
+    search_msg_limit: int = 5,
+) -> "Mem0Memory":
+    """
+    Return a Mem0Memory instance configured for the given session.
+    
+    Uses Mem0Memory.from_config() with Qdrant as the vector store backend,
+    enabling session-scoped conversation memory that persists across requests.
+    
+    Note: AWS_REGION must be set before importing mem0 modules. This is due to
+    a bug in Mem0's factory which uses BaseLlmConfig instead of AWSBedrockConfig,
+    preventing aws_region from being passed in the config dict.
+    
+    Args:
+        session_id: Session identifier used as user_id in Mem0 context.
+        search_msg_limit: Number of recent messages to use for memory search context.
+        
+    Returns:
+        Mem0Memory instance configured with session context.
+        
+    Example:
+        # Set AWS_REGION before importing
+        import os
+        os.environ["AWS_REGION"] = "ap-southeast-2"
+        
+        from veris_chat.chat.retriever import get_session_memory
+        memory = get_session_memory("a157")
+        
+        # Add a message to memory
+        from llama_index.core.base.llms.types import ChatMessage, MessageRole
+        memory.put(ChatMessage(role=MessageRole.USER, content="Hello"))
+        
+        # Get chat history with memory context
+        messages = memory.get(input="What did we discuss?")
+    """
+    from veris_chat.utils.memory import Mem0Memory
+    
+    logger.info(f"[MEMORY] Creating Mem0Memory for session_id={session_id}")
+    
+    config = load_config()
+    
+    # Build Mem0 config using Qdrant as vector store
+    qdrant_url = config["qdrant"].get("url") or os.getenv("QDRANT_URL", "")
+    qdrant_api_key = config["qdrant"].get("api_key") or os.getenv("QDRANT_API_KEY", "")
+    
+    # Get Bedrock kwargs for LLM and embedder
+    bedrock_kwargs = get_bedrock_kwargs(config)
+    aws_region = bedrock_kwargs.get("region_name", "ap-southeast-2")
+    
+    # IMPORTANT: Set AWS_REGION env var for Mem0's Bedrock integration
+    # Mem0's factory uses BaseLlmConfig which doesn't accept aws_region param,
+    # so we must set it via environment variable. This should be set BEFORE
+    # importing mem0 modules for best results.
+    os.environ["AWS_REGION"] = aws_region
+    
+    # Mem0 config structure for local or cloud Qdrant
+    if qdrant_url:
+        logger.info(f"[MEMORY] Using Qdrant cloud for memory: {qdrant_url}")
+        mem0_config = {
+            "vector_store": {
+                "provider": "qdrant",
+                "config": {
+                    "url": qdrant_url,
+                    "api_key": qdrant_api_key,
+                    "collection_name": f"mem0_memory_{session_id}",
+                    "embedding_model_dims": 1024,
+                },
+            },
+            "embedder": {
+                "provider": "aws_bedrock",
+                "config": {
+                    "model": config["models"].get("embedding_model", "cohere.embed-english-v3"),
+                },
+            },
+            "llm": {
+                "provider": "aws_bedrock",
+                "config": {
+                    # Claude 3.5 Sonnet v2 supports ON_DEMAND in ap-southeast-2
+                    "model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+                    "temperature": 0.1,
+                    "max_tokens": 2000,
+                },
+            },
+        }
+    else:
+        logger.info("[MEMORY] Using local Qdrant for memory")
+        mem0_config = {
+            "vector_store": {
+                "provider": "qdrant",
+                "config": {
+                    "path": "./qdrant_local",
+                    "collection_name": f"mem0_memory_{session_id}",
+                    "embedding_model_dims": 1024,
+                },
+            },
+            "embedder": {
+                "provider": "aws_bedrock",
+                "config": {
+                    "model": config["models"].get("embedding_model", "cohere.embed-english-v3"),
+                },
+            },
+            "llm": {
+                "provider": "aws_bedrock",
+                "config": {
+                    # Claude 3.5 Sonnet v2 supports ON_DEMAND in ap-southeast-2
+                    "model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+                    "temperature": 0.1,
+                    "max_tokens": 2000,
+                },
+            },
+        }
+    
+    # Context uses session_id as user_id for session isolation
+    context = {"user_id": session_id}
+    
+    memory = Mem0Memory.from_config(
+        context=context,
+        config=mem0_config,
+        search_msg_limit=search_msg_limit,
+    )
+    
+    logger.info(f"[MEMORY] Mem0Memory created for session_id={session_id}")
+    return memory
+
+
 def format_citations_for_response(
     source_nodes: List[dict],
     style: str = "markdown_link",
