@@ -183,47 +183,40 @@ embeddings = model.get_text_embedding_batch(coherePayload)
 print(embeddings)
 ```
 
-#### **2.3.2 LLM Genration*x**
+#### **2.3.2 LLM Generation**
 
-Example Python code:
+**Sync Generation** (using deprecated `Bedrock` class):
 
 ```python
 from llama_index.core.llms import ChatMessage
 from llama_index.llms.bedrock import Bedrock
 
+llm = Bedrock(model="anthropic.claude-3-5-sonnet-20241022-v2:0", profile_name=profile_name)
 messages = [
-    ChatMessage(
-        role="system", content="You are a pirate with a colorful personality"
-    ),
+    ChatMessage(role="system", content="You are a helpful assistant"),
     ChatMessage(role="user", content="Tell me a story"),
 ]
-
-resp = Bedrock(
-    model="amazon.titan-text-express-v1", profile_name=profile_name
-).chat(messages)
+resp = llm.chat(messages)
+resp = llm.stream_chat(messages)  # sync streaming works
 ```
 
-Streaming:
+**Async Streaming** (using `BedrockConverse` - recommended):
 
 ```python
-from llama_index.llms.bedrock import Bedrock
-llm = Bedrock(
-    model="amazon.titan-text-express-v1",
-    aws_access_key_id="AWS Access Key ID to use",
-    aws_secret_access_key="AWS Secret Access Key to use",
-    aws_session_token="AWS Session Token to use",
-    region_name="AWS Region to use, eg. us-east-1",
-)
-# or simply
-llm = Bedrock(model="amazon.titan-text-express-v1", profile_name=profile_name)
+from llama_index.llms.bedrock_converse import BedrockConverse
+
+llm = BedrockConverse(model="anthropic.claude-3-5-sonnet-20241022-v2:0", profile_name=profile_name)
 messages = [
-    ChatMessage(
-        role="system", content="You are a pirate with a colorful personality"
-    ),
+    ChatMessage(role="system", content="You are a helpful assistant"),
     ChatMessage(role="user", content="Tell me a story"),
 ]
-resp = llm.stream_chat(messages)
+
+# Async streaming (for FastAPI /chat/stream/ endpoint)
+async for chunk in llm.astream_chat(messages):
+    print(chunk.delta, end="")
 ```
+
+**Note**: `llama_index.llms.bedrock.Bedrock` has `astream_chat()` but raises `NotImplementedError`. Use `BedrockConverse` for async streaming. See `documents/async.md` for concurrency details.
 
 #### **2.3.3 Citation-Grounded Generation**
 ```python
@@ -273,9 +266,11 @@ Each user request contains:
 
 `session_id` is used to retrieve the memory.
 
+Two endpoints:
+- `/chat/` - Sync endpoint (uses thread pool for concurrency)
+- `/chat/stream/` - Async streaming endpoint (uses `BedrockConverse.astream_chat()`)
 
-Two endpoints are `/chat/` and `/chat/stream/` (streaming).
-
+Response format:
 ```json
 {
     "response": "...",
@@ -286,5 +281,15 @@ Two endpoints are `/chat/` and `/chat/stream/` (streaming).
     ],
 }
 ```
+
+Streaming format (Server-Sent Events):
+```
+{"type": "token", "content": "The site"}
+{"type": "token", "content": " is classified"}
+...
+{"type": "done", "citations": [...], "sources": [...]}
+```
+
+See `documents/async.md` for details on sync vs async concurrency patterns.
 ---
  
