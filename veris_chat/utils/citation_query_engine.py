@@ -46,11 +46,13 @@ from llama_index.core.settings import Settings
 # =============================================================================
 
 CITATION_QA_TEMPLATE = PromptTemplate(
-    "Please provide an answer based solely on the provided sources. "
-    "When referencing information from a source, cite it using the EXACT markdown link format provided with each source. "
-    "Every answer should include at least one source citation. "
+    "Please provide an answer based on the provided sources and conversation context. "
+    "When referencing information from a source document, cite it using the EXACT markdown link format provided with each source. "
+    "For document-based answers, include at least one source citation. "
     "Only cite a source when you are explicitly referencing it. "
-    "If none of the sources are helpful, you should indicate that. "
+    "If the query can be answered from conversation context (e.g., user preferences, previous discussions), "
+    "you may answer without document citations. "
+    "If neither sources nor conversation context are helpful, indicate that. "
     "\n\n"
     "IMPORTANT: Use the citation link EXACTLY as provided (do not modify the URL or format).\n"
     "\n"
@@ -72,11 +74,12 @@ CITATION_QA_TEMPLATE = PromptTemplate(
 )
 
 CITATION_REFINE_TEMPLATE = PromptTemplate(
-    "Please provide an answer based solely on the provided sources. "
-    "When referencing information from a source, cite it using the EXACT markdown link format provided with each source. "
-    "Every answer should include at least one source citation. "
+    "Please provide an answer based on the provided sources and conversation context. "
+    "When referencing information from a source document, cite it using the EXACT markdown link format provided with each source. "
+    "For document-based answers, include at least one source citation. "
     "Only cite a source when you are explicitly referencing it. "
-    "If none of the sources are helpful, you should indicate that. "
+    "If the query can be answered from conversation context, you may answer without document citations. "
+    "If neither sources nor conversation context are helpful, indicate that. "
     "\n\n"
     "IMPORTANT: Use the citation link EXACTLY as provided (do not modify the URL or format).\n"
     "\n"
