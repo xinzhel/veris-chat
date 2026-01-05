@@ -32,6 +32,10 @@ logger = setup_logging(
     allowed_namespaces=("veris_chat", "__main__"),
 )
 
+# Enable DEBUG level for service module to see memory content
+import logging
+logging.getLogger("veris_chat.chat.service").setLevel(logging.DEBUG)
+
 print("=" * 60)
 print("End-to-End Chat Service Test")
 print("=" * 60)
@@ -162,7 +166,7 @@ try:
     )
     
     print("  ✓ Chat with memory completed")
-    print(f"  Answer preview: {response3['answer'][:200]}...")
+    print(f"  Answer preview: {response3['answer']}...")
     
     # Wait a bit for Mem0 to extract facts
     import time
@@ -180,7 +184,7 @@ try:
     )
     
     print(f"\n  Memory test - asking 'What is my name?':")
-    print(f"  Answer: {response4['answer'][:300]}...")
+    print(f"  Answer: {response4['answer']}...")
     
     if "Alice" in response4["answer"]:
         print("  ✓ Memory recall working - found 'Alice' in response")

@@ -241,6 +241,11 @@ def chat(
             if messages_with_context and messages_with_context[0].role == MessageRole.SYSTEM:
                 memory_context = messages_with_context[0].content
                 logger.info(f"[SERVICE] Retrieved memory context: {len(memory_context)} chars")
+                logger.debug(f"[SERVICE] Memory context content: {memory_context[:500]}...")
+            else:
+                logger.info(f"[SERVICE] No system message in memory response, messages: {len(messages_with_context)}")
+                for i, msg in enumerate(messages_with_context[:3]):
+                    logger.debug(f"[SERVICE] Message {i}: role={msg.role}, content={str(msg.content)[:100]}...")
             
         except Exception as e:
             logger.warning(f"[SERVICE] Memory initialization failed, continuing without memory: {e}")
@@ -253,6 +258,7 @@ def chat(
         # Prepend memory context to help the LLM understand user preferences/history
         query_text = f"Context from previous conversations:\n{memory_context}\n\nCurrent question: {message}"
         logger.info(f"[SERVICE] Augmented query with memory context")
+        logger.debug(f"[SERVICE] Augmented query (first 500 chars): {query_text[:500]}...")
     
     # Execute query
     logger.info(f"[SERVICE] Executing query: {message[:50]}...")
