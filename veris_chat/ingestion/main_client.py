@@ -14,6 +14,8 @@ Pipeline:
 import os
 import uuid
 import json
+import time
+from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import logging
@@ -177,7 +179,7 @@ class IngestionClient:
 
 
     def _load_url_cache(self):
-        """Load URL→local_path cache from JSON first, then merge Qdrant contents."""
+        """Load URL→{local_path, ingestion_time} cache from JSON first, then merge Qdrant contents."""
         # 1) Load from local JSON
         if self.cache_file.exists():
             try:
@@ -191,7 +193,7 @@ class IngestionClient:
             logger.info("[CACHE] No url_cache.json found. Starting empty cache.")
             self.url_cache = {}
 
-        # 2) Merge Qdrant URLs if any
+        # 2) Merge Qdrant URLs if any (for URLs not in local cache)
         try:
             offset = None
             while True:
@@ -205,9 +207,13 @@ class IngestionClient:
                 for r in records:
                     payload = r.payload or {}
                     url = payload.get("url")
-                    local_path = payload.get("local_path")
                     if url and url not in self.url_cache:
-                        self.url_cache[url] = local_path
+                        # Add minimal entry for URLs found in Qdrant but not in cache
+                        self.url_cache[url] = {
+                            "local_path": payload.get("local_path"),
+                            "ingestion_time": None,
+                            "ingested_at": None,
+                        }
                 if offset is None:
                     break
         except Exception as e:
@@ -337,13 +343,29 @@ class IngestionClient:
             logger.info(f"[INGEST] URL already processed, skipping: {url}")
             return
 
+        t_start = time.perf_counter()
+        
         parsed_pages = self._download_parse_pdf(url)
+        
+        # Get local_path from the first parsed page (all pages share same file)
+        local_path = None
+        if parsed_pages:
+            # Reconstruct local_path from pdf_dir and filename
+            filename = parsed_pages[0].get("filename", "")
+            local_path = str(self.pdf_dir / filename) if filename else None
+        
         self._index_document(url, parsed_pages, session_id=session_id)
         
-        # Update cache only after successful indexing
-        self.url_cache[url] = url
+        ingestion_time = time.perf_counter() - t_start
+        
+        # Update cache with (local_path, ingestion_time)
+        self.url_cache[url] = {
+            "local_path": local_path,
+            "ingestion_time": round(ingestion_time, 3),
+            "ingested_at": datetime.now().isoformat(),
+        }
         self._save_url_cache()
-        logger.info(f"[INGEST] URL cached after successful indexing: {url}")
+        logger.info(f"[INGEST] URL cached after successful indexing: {url} (took {ingestion_time:.2f}s)")
 
     def retrieve(self, query: str, url: Optional[str] = None, top_k: int = 3) -> Dict[str, Any]:
         """

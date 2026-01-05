@@ -412,8 +412,7 @@ def get_session_memory(
             "llm": {
                 "provider": "aws_bedrock",
                 "config": {
-                    # Claude 3.5 Sonnet v2 supports ON_DEMAND in ap-southeast-2
-                    "model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+                    "model": config["models"].get("memory_llm", "anthropic.claude-3-5-sonnet-20241022-v2:0"),
                     "temperature": 0.1,
                     "max_tokens": 2000,
                 },
@@ -439,8 +438,7 @@ def get_session_memory(
             "llm": {
                 "provider": "aws_bedrock",
                 "config": {
-                    # Claude 3.5 Sonnet v2 supports ON_DEMAND in ap-southeast-2
-                    "model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+                    "model": config["models"].get("memory_llm", "anthropic.claude-3-5-sonnet-20241022-v2:0"),
                     "temperature": 0.1,
                     "max_tokens": 2000,
                 },

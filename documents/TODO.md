@@ -13,6 +13,11 @@
   response = engine.query(query_text)  # Chat history lost here
   ```
 * Options: (1) Modify CitationQueryEngine to accept system prompt, or (2) Use LLM chat directly with full message history
+
+## URL Cache Not Session-Aware
+* `IngestionClient.url_cache` tracks URLs globally, not per-session
+* If URL is ingested for session A, it's skipped for session B (even though B has no documents)
+* Fix: Track (url, session_id) pairs, or re-ingest with different session_id
 ## Finish Task 2
 * citation footnotes: No need. Fully in-text citation
 * URL link should be inserted in a specific format, determined by Ozzy for rendering 

@@ -1,7 +1,8 @@
 # Model settings
 models:
   embedding_model: "cohere.embed-english-v3"  # AWS Bedrock embedding model
-  generation_model: "anthropic.claude-3-5-sonnet-20240620-v1:0"
+  generation_model: "anthropic.claude-3-5-sonnet-20241022-v2:0" 
+  memory_llm: "anthropic.claude-3-5-sonnet-20241022-v2:0"  # For Mem0 fact extraction (v2 supports ON_DEMAND in ap-southeast-2)
 
 # Qdrant settings
 qdrant:

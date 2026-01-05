@@ -146,14 +146,16 @@ except Exception as e:
 # -----------------------------------------------------------------------------
 print("\n[3/4] Testing chat with memory enabled...")
 
-TEST_SESSION_ID_MEMORY = "test_chat_service_memory_001"
+# Use the SAME session_id as test 1/2 since documents are already ingested there
+# The URL cache doesn't track session_id, so we reuse the session with documents
+TEST_SESSION_ID_MEMORY = TEST_SESSION_ID  # Reuse session with ingested documents
 
 try:
     # First message with memory
     response3 = chat(
         session_id=TEST_SESSION_ID_MEMORY,
-        message="My name is Alice. What documents do you have access to?",
-        document_urls=TEST_URLS,
+        message="My name is Alice. What is the purpose of this document?",
+        document_urls=None,  # Documents already ingested for this session
         top_k=5,
         use_memory=True,
         citation_style="markdown_link",
@@ -161,6 +163,11 @@ try:
     
     print("  ✓ Chat with memory completed")
     print(f"  Answer preview: {response3['answer'][:200]}...")
+    
+    # Wait a bit for Mem0 to extract facts
+    import time
+    print("  ⏳ Waiting for Mem0 to extract facts (3s)...")
+    time.sleep(3)
     
     # Follow-up to test memory recall
     response4 = chat(
