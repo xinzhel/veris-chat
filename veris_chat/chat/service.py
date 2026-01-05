@@ -45,6 +45,7 @@ from veris_chat.chat.retriever import (
 )
 from veris_chat.ingestion.main_client import IngestionClient
 from veris_chat.utils.citation_query_engine import CitationQueryEngine
+from veris_chat.utils.logger import print_timing_summary
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,7 @@ def chat(
         "ingestion": 0.0,
         "retrieval": 0.0,
         "generation": 0.0,
+        "memory": 0.0,
         "total": 0.0,
     }
     t_total_start = time.perf_counter()
@@ -222,6 +224,8 @@ def chat(
     
     if use_memory:
         try:
+            t_memory_start = time.perf_counter()
+            
             # Set AWS_REGION for Mem0
             aws_region = config.get("aws", {}).get("region", "ap-southeast-2")
             os.environ["AWS_REGION"] = aws_region
@@ -246,6 +250,8 @@ def chat(
                 logger.info(f"[SERVICE] No system message in memory response, messages: {len(messages_with_context)}")
                 for i, msg in enumerate(messages_with_context[:3]):
                     logger.debug(f"[SERVICE] Message {i}: role={msg.role}, content={str(msg.content)[:100]}...")
+            
+            timing["memory"] = time.perf_counter() - t_memory_start
             
         except Exception as e:
             logger.warning(f"[SERVICE] Memory initialization failed, continuing without memory: {e}")
@@ -314,7 +320,10 @@ def chat(
         "session_id": session_id,
     }
     
-    logger.info(f"[SERVICE] chat() completed in {timing['total']:.2f}s")
+    # Log timing summary
+    logger.info(f"[SERVICE] chat() completed - Ingestion: {timing['ingestion']:.2f}s, "
+                f"Memory: {timing['memory']:.2f}s, Retrieval: {timing['retrieval']:.2f}s, "
+                f"Generation: {timing['generation']:.2f}s, Total: {timing['total']:.2f}s")
     return result
 
 

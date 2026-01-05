@@ -64,3 +64,102 @@ def setup_logging(
         logger.addHandler(console_handler)
     #  ～～～～～～  Console handler (End) ～～～～～～
     return logger
+
+
+def print_timing_summary(
+    timing_results: dict,
+    title: str = "Timing Summary",
+    logger: logging.Logger = None,
+    compact: bool = False,
+) -> None:
+    """
+    Print a formatted timing summary to console and optionally to logger.
+    
+    Args:
+        timing_results: Dict with timing keys. Supported keys:
+            - ingestion: Document ingestion time
+            - index_creation: Qdrant index/connection time
+            - retrieval / engine_retrieval: Semantic search time
+            - generation / engine_generation: LLM generation time
+            - memory: Memory retrieval time
+            - total / citation_query_total: Total query time
+        title: Title for the summary section.
+        logger: Optional logger to also write timing info.
+        compact: If True, print single-line format without borders.
+        
+    Example:
+        timing = {"ingestion": 2.5, "retrieval": 0.5, "generation": 3.2, "total": 6.2}
+        print_timing_summary(timing, title="Chat Service Timing")
+        
+        # Compact mode for inline use
+        print_timing_summary(timing, compact=True)
+        # Output: Ingestion: 2.500s | Retrieval: 0.500s | Generation: 3.200s | Total: 6.200s
+    """
+    if compact:
+        # Single-line compact format
+        parts = []
+        if timing_results.get("ingestion", 0) > 0:
+            parts.append(f"Ingestion: {timing_results['ingestion']:.2f}s")
+        if timing_results.get("memory", 0) > 0:
+            parts.append(f"Memory: {timing_results['memory']:.2f}s")
+        retrieval = timing_results.get("retrieval") or timing_results.get("engine_retrieval")
+        if retrieval:
+            parts.append(f"Retrieval: {retrieval:.2f}s")
+        generation = timing_results.get("generation") or timing_results.get("engine_generation")
+        if generation:
+            parts.append(f"Generation: {generation:.2f}s")
+        total = timing_results.get("total") or timing_results.get("citation_query_total")
+        if total:
+            parts.append(f"Total: {total:.2f}s")
+        
+        msg = " | ".join(parts)
+        print(f"  {msg}")
+        if logger:
+            logger.info(msg)
+        return
+    
+    # Full format with borders
+    print("\n" + "=" * 60)
+    print(title)
+    print("=" * 60)
+    
+    if logger:
+        logger.info("=" * 60)
+        logger.info(title)
+        logger.info("=" * 60)
+    
+    def _log(msg):
+        print(f"  {msg}")
+        if logger:
+            logger.info(msg)
+    
+    # Ingestion
+    if "ingestion" in timing_results and timing_results["ingestion"] > 0:
+        _log(f"1) Ingestion: {timing_results['ingestion']:.3f}s")
+    
+    # Index creation
+    if "index_creation" in timing_results:
+        _log(f"2) Index Creation (Qdrant): {timing_results['index_creation']:.3f}s")
+    
+    # Retrieval
+    retrieval = timing_results.get("retrieval") or timing_results.get("engine_retrieval")
+    if retrieval is not None:
+        _log(f"3) Retrieval (semantic search): {retrieval:.3f}s")
+    
+    # Generation
+    generation = timing_results.get("generation") or timing_results.get("engine_generation")
+    if generation is not None:
+        _log(f"4) Generation (LLM): {generation:.3f}s")
+    
+    # Memory
+    if "memory" in timing_results and timing_results["memory"] > 0:
+        _log(f"5) Memory retrieval: {timing_results['memory']:.3f}s")
+    
+    # Total
+    total = timing_results.get("total") or timing_results.get("citation_query_total")
+    if total is not None:
+        _log(f"TOTAL: {total:.3f}s")
+    
+    print("=" * 60)
+    if logger:
+        logger.info("=" * 60)

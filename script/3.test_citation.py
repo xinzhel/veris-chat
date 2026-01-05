@@ -18,7 +18,7 @@ import logging
 sys.path.insert(0, ".")
 
 from veris_chat.chat.config import load_config, get_bedrock_kwargs
-from veris_chat.utils.logger import setup_logging
+from veris_chat.utils.logger import setup_logging, print_timing_summary
 
 # Setup logging
 logger = setup_logging(
@@ -214,49 +214,18 @@ else:
 # -----------------------------------------------------------------------------
 # Log timing summary
 # -----------------------------------------------------------------------------
-print("\n" + "=" * 60)
-print("Timing Summary")
-print("=" * 60)
+# Map timing_results to standard keys for print_timing_summary
+timing_for_summary = {
+    "index_creation": timing_results.get("index_creation", 0),
+    "retrieval": timing_results.get("engine_retrieval", 0),
+    "generation": timing_results.get("engine_generation", 0),
+    "total": timing_results.get("citation_query_total", 0),
+}
 
-timing_logger.info("=" * 60)
-timing_logger.info("TIMING SUMMARY - Citation-Grounded Generation Test")
-timing_logger.info("=" * 60)
-
-# Note: Ingestion is done separately in test_ingestion.py
-# Here we measure retrieval and generation which happen together in CitationQueryEngine
 print("\n  Note: Ingestion timing is measured in test_ingestion.py")
 print("  CitationQueryEngine.query() combines retrieval + generation.\n")
 
-timing_logger.info("Note: Ingestion timing is measured in test_ingestion.py")
-timing_logger.info("CitationQueryEngine.query() combines retrieval + generation.")
-
-if "index_creation" in timing_results:
-    msg = f"1) Index Creation (Qdrant connection): {timing_results['index_creation']:.3f}s"
-    print(f"  {msg}")
-    timing_logger.info(msg)
-
-# Use engine timing for accurate retrieval/generation breakdown
-if "engine_retrieval" in timing_results:
-    msg = f"2) Retrieval (semantic search): {timing_results['engine_retrieval']:.3f}s"
-    print(f"  {msg}")
-    timing_logger.info(msg)
-
-if "engine_generation" in timing_results:
-    msg = f"3) Citation-Grounded Generation (LLM): {timing_results['engine_generation']:.3f}s"
-    print(f"  {msg}")
-    timing_logger.info(msg)
-
-if "citation_query_total" in timing_results:
-    msg = f"   (Citation Query Total): {timing_results['citation_query_total']:.3f}s"
-    print(f"  {msg}")
-    timing_logger.info(msg)
-
-# Calculate total (excluding citation_query_total to avoid double counting)
-total_time = timing_results.get("index_creation", 0) + timing_results.get("citation_query_total", 0)
-msg = f"TOTAL (Index + Query): {total_time:.3f}s"
-print(f"\n  {msg}")
-timing_logger.info(msg)
-timing_logger.info("=" * 60)
+print_timing_summary(timing_for_summary, title="Citation-Grounded Generation Timing", logger=timing_logger)
 
 print("\n" + "=" * 60)
 print("Citation-grounded generation test completed!")

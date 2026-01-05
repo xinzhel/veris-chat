@@ -21,7 +21,7 @@ os.environ["AWS_REGION"] = "ap-southeast-2"
 sys.path.insert(0, ".")
 
 from veris_chat.chat.config import load_config
-from veris_chat.utils.logger import setup_logging
+from veris_chat.utils.logger import setup_logging, print_timing_summary
 
 # Setup logging
 logger = setup_logging(
@@ -36,16 +36,23 @@ logger = setup_logging(
 import logging
 logging.getLogger("veris_chat.chat.service").setLevel(logging.DEBUG)
 
-print("=" * 60)
-print("End-to-End Chat Service Test")
-print("=" * 60)
+
+def log_print(msg: str):
+    """Print to console and log to file."""
+    # print(msg)
+    logger.info(msg)
+
+
+log_print("=" * 60)
+log_print("End-to-End Chat Service Test")
+log_print("=" * 60)
 
 # -----------------------------------------------------------------------------
 # Load configuration
 # -----------------------------------------------------------------------------
-print("\n[Setup] Loading configuration...")
+log_print("\n[Setup] Loading configuration...")
 config = load_config()
-print("  ✓ Configuration loaded")
+log_print("  ✓ Configuration loaded")
 
 # Test constants
 TEST_SESSION_ID = "test_chat_service_001"
@@ -53,21 +60,21 @@ TEST_URLS = [
     "https://drapubcdnprd.azureedge.net/publicregister/attachments/permissions/e991aac7-4fb2-eb11-8236-00224814b351/OL000071228 - Statutory Document.pdf",
 ]
 
-print(f"  Test session_id: {TEST_SESSION_ID}")
-print(f"  Test document URLs: {len(TEST_URLS)}")
+log_print(f"  Test session_id: {TEST_SESSION_ID}")
+log_print(f"  Test document URLs: {len(TEST_URLS)}")
 
 # -----------------------------------------------------------------------------
 # Clear any cached resources from previous runs
 # -----------------------------------------------------------------------------
-print("\n[Cleanup] Clearing cached resources...")
+log_print("\n[Cleanup] Clearing cached resources...")
 from veris_chat.chat.service import clear_cache
 clear_cache()
-print("  ✓ Cache cleared")
+log_print("  ✓ Cache cleared")
 
 # -----------------------------------------------------------------------------
 # Test 1: Chat with document ingestion
 # -----------------------------------------------------------------------------
-print("\n[1/4] Testing chat with document ingestion...")
+log_print("\n[1/4] Testing chat with document ingestion...")
 
 from veris_chat.chat.service import chat
 
@@ -81,37 +88,33 @@ try:
         citation_style="markdown_link",
     )
     
-    print("  ✓ Chat completed successfully")
-    print(f"\n  Answer preview:")
-    print(f"  {'-' * 50}")
+    log_print("  ✓ Chat completed successfully")
+    log_print(f"\n  Answer preview:")
+    log_print(f"  {'-' * 50}")
     answer_preview = response["answer"][:500] if len(response["answer"]) > 500 else response["answer"]
-    print(f"  {answer_preview}...")
-    print(f"  {'-' * 50}")
+    log_print(f"  {answer_preview}...")
+    log_print(f"  {'-' * 50}")
     
-    print(f"\n  Citations: {len(response['citations'])}")
+    log_print(f"\n  Citations: {len(response['citations'])}")
     for i, citation in enumerate(response["citations"][:3], 1):
-        print(f"    {i}. {citation}")
+        log_print(f"    {i}. {citation}")
     
-    print(f"\n  Sources: {len(response['sources'])}")
+    log_print(f"\n  Sources: {len(response['sources'])}")
     for i, source in enumerate(response["sources"][:3], 1):
-        print(f"    {i}. {source.get('file')} (p.{source.get('page')})")
+        log_print(f"    {i}. {source.get('file')} (p.{source.get('page')})")
     
-    print(f"\n  Timing:")
-    timing = response["timing"]
-    print(f"    Ingestion: {timing.get('ingestion', 0):.2f}s")
-    print(f"    Retrieval: {timing.get('retrieval', 0):.2f}s")
-    print(f"    Generation: {timing.get('generation', 0):.2f}s")
-    print(f"    Total: {timing.get('total', 0):.2f}s")
+    log_print(f"\n  Timing:")
+    print_timing_summary(response["timing"], compact=True, logger=logger)
     
 except Exception as e:
-    print(f"  ✗ Chat failed: {e}")
+    log_print(f"  ✗ Chat failed: {e}")
     import traceback
     traceback.print_exc()
 
 # -----------------------------------------------------------------------------
 # Test 2: Follow-up chat (no new documents)
 # -----------------------------------------------------------------------------
-print("\n[2/4] Testing follow-up chat (no new documents)...")
+log_print("\n[2/4] Testing follow-up chat (no new documents)...")
 
 try:
     response2 = chat(
@@ -123,32 +126,25 @@ try:
         citation_style="markdown_link",
     )
     
-    print("  ✓ Follow-up chat completed successfully")
-    print(f"\n  Answer preview:")
-    print(f"  {'-' * 50}")
+    log_print("  ✓ Follow-up chat completed successfully")
+    log_print(f"\n  Answer preview:")
+    log_print(f"  {'-' * 50}")
     answer_preview = response2["answer"][:500] if len(response2["answer"]) > 500 else response2["answer"]
-    print(f"  {answer_preview}...")
-    print(f"  {'-' * 50}")
+    log_print(f"  {answer_preview}...")
+    log_print(f"  {'-' * 50}")
     
-    print(f"\n  Timing (no ingestion expected):")
-    timing2 = response2["timing"]
-    print(f"    Ingestion: {timing2.get('ingestion', 0):.2f}s")
-    print(f"    Retrieval: {timing2.get('retrieval', 0):.2f}s")
-    print(f"    Generation: {timing2.get('generation', 0):.2f}s")
-    print(f"    Total: {timing2.get('total', 0):.2f}s")
-    
-    if timing2.get("ingestion", 0) == 0:
-        print("  ✓ Correctly skipped ingestion for follow-up")
+    log_print(f"\n  Timing (no ingestion expected):")
+    print_timing_summary(response2["timing"], compact=True, logger=logger)
     
 except Exception as e:
-    print(f"  ✗ Follow-up chat failed: {e}")
+    log_print(f"  ✗ Follow-up chat failed: {e}")
     import traceback
     traceback.print_exc()
 
 # -----------------------------------------------------------------------------
 # Test 3: Chat with memory enabled
 # -----------------------------------------------------------------------------
-print("\n[3/4] Testing chat with memory enabled...")
+log_print("\n[3/4] Testing chat with memory enabled...")
 
 # Use the SAME session_id as test 1/2 since documents are already ingested there
 # The URL cache doesn't track session_id, so we reuse the session with documents
@@ -165,12 +161,12 @@ try:
         citation_style="markdown_link",
     )
     
-    print("  ✓ Chat with memory completed")
-    print(f"  Answer preview: {response3['answer']}...")
+    log_print("  ✓ Chat with memory completed")
+    log_print(f"  Answer preview: {response3['answer']}...")
     
     # Wait a bit for Mem0 to extract facts
     import time
-    print("  ⏳ Waiting for Mem0 to extract facts (3s)...")
+    log_print("  ⏳ Waiting for Mem0 to extract facts (3s)...")
     time.sleep(3)
     
     # Follow-up to test memory recall
@@ -183,23 +179,23 @@ try:
         citation_style="markdown_link",
     )
     
-    print(f"\n  Memory test - asking 'What is my name?':")
-    print(f"  Answer: {response4['answer']}...")
+    log_print(f"\n  Memory test - asking 'What is my name?':")
+    log_print(f"  Answer: {response4['answer']}...")
     
     if "Alice" in response4["answer"]:
-        print("  ✓ Memory recall working - found 'Alice' in response")
+        log_print("  ✓ Memory recall working - found 'Alice' in response")
     else:
-        print("  ⚠ Memory recall may not be working - 'Alice' not found in response")
+        log_print("  ⚠ Memory recall may not be working - 'Alice' not found in response")
     
 except Exception as e:
-    print(f"  ✗ Chat with memory failed: {e}")
+    log_print(f"  ✗ Chat with memory failed: {e}")
     import traceback
     traceback.print_exc()
 
 # -----------------------------------------------------------------------------
 # Test 4: Different citation styles
 # -----------------------------------------------------------------------------
-print("\n[4/4] Testing different citation styles...")
+log_print("\n[4/4] Testing different citation styles...")
 
 citation_styles = ["markdown_link", "inline", "bracket", "footnote"]
 
@@ -215,13 +211,17 @@ for style in citation_styles:
         )
         
         if response_style["citations"]:
-            print(f"  {style}: {response_style['citations'][0]}")
+            log_print(f"  {style}: {response_style['citations'][0]}")
         else:
-            print(f"  {style}: (no citations)")
+            log_print(f"  {style}: (no citations)")
             
     except Exception as e:
-        print(f"  {style}: Error - {e}")
+        log_print(f"  {style}: Error - {e}")
 
-print("\n" + "=" * 60)
-print("End-to-end chat service test completed!")
-print("=" * 60)
+# Print final timing summary from last response
+if 'response' in dir() and response:
+    print_timing_summary(response["timing"], title="Final Timing Summary (Test 1)", logger=logger)
+
+log_print("\n" + "=" * 60)
+log_print("End-to-end chat service test completed!")
+log_print("=" * 60)
