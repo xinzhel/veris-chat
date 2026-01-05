@@ -3,6 +3,9 @@ models:
   embedding_model: "cohere.embed-english-v3"  # AWS Bedrock embedding model
   generation_model: "anthropic.claude-3-5-sonnet-20241022-v2:0" 
   memory_llm: "anthropic.claude-3-5-sonnet-20241022-v2:0"  # For Mem0 fact extraction (v2 supports ON_DEMAND in ap-southeast-2)
+  # BedrockConverse requires cross-region inference profile for Claude 3.5 Sonnet v2 in ap-southeast-2
+  # Use "us." prefix to route through US regions where on-demand is supported
+  streaming_model: "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
 
 # Qdrant settings
 qdrant:

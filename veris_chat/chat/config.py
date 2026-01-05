@@ -90,7 +90,7 @@ def get_bedrock_kwargs(config: Dict[str, Any]) -> Dict[str, Any]:
         Dict of kwargs for BedrockEmbedding or Bedrock LLM initialization.
     """
     aws_cfg = config.get("aws", {})
-    kwargs = {"region_name": aws_cfg.get("region", "us-east-1")}
+    kwargs = {"region_name": aws_cfg.get("region", "ap-southeast-2")}
 
     # Only add explicit credentials if not using SSO
     if not aws_cfg.get("use_sso", True):

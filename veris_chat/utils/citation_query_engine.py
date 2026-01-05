@@ -28,6 +28,7 @@ from llama_index.core.schema import (
     TextNode,
 )
 from llama_index.core.settings import Settings
+from llama_index.core.prompts.prompt_utils import get_biggest_prompt
 
 # =============================================================================
 # IN-TEXT CITATION WITH MARKDOWN LINKS
@@ -368,6 +369,109 @@ class CitationQueryEngine(BaseQueryEngine):
             nodes = postprocessor.postprocess_nodes(nodes, query_bundle=query_bundle)
 
         return nodes
+
+    def prepare_streaming_context(
+        self,
+        query: str,
+        nodes: Optional[List[NodeWithScore]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Prepare context for async streaming generation.
+        
+        This method replicates the CitationQueryEngine workflow without executing
+        the LLM call, allowing external async streaming with BedrockConverse.
+        
+        Workflow replicated:
+        1. Retrieve nodes (if not provided)
+        2. Create citation nodes with markdown links
+        3. Pack text chunks using CompactAndRefine logic
+        4. Format CITATION_QA_TEMPLATE with packed context
+        
+        Args:
+            query: The user's query string.
+            nodes: Optional pre-retrieved nodes. If None, will retrieve.
+            
+        Returns:
+            Dict containing:
+            - prompt: Formatted prompt ready for LLM
+            - citation_nodes: The processed citation nodes (for metadata extraction)
+            - context_str: The packed context string
+            - context_overflow: Whether context exceeded single-call limit
+            - total_chunks: Number of packed chunks (1 if no overflow)
+        """
+        query_bundle: QueryBundle = QueryBundle(query_str=query)
+        
+        # Step 1: Retrieve if not provided
+        if nodes is None:
+            nodes = self.retrieve(query_bundle)
+        
+        # Step 2: Create citation nodes with Source: [filename (p.X)](url) format
+        citation_nodes: List[NodeWithScore] = self._create_citation_nodes(nodes)
+        
+        # Step 3: Extract text content from citation nodes
+        text_chunks: List[str] = [
+            node.node.get_content(metadata_mode=MetadataMode.LLM)
+            for node in citation_nodes
+        ]
+        
+        # Step 4: Pack text chunks using CompactAndRefine logic
+        # This uses PromptHelper to fit context within LLM's context window
+        # partial_format pre-fills {query_str}, leaving {context_str} unfilled
+        text_qa_template: PromptTemplate = CITATION_QA_TEMPLATE.partial_format(query_str=query)
+        refine_template: PromptTemplate = CITATION_REFINE_TEMPLATE.partial_format(query_str=query)
+        
+        # get_biggest_prompt compares token count of templates, returns larger one
+        # Refine template is bigger (has {existing_answer}), used for conservative sizing
+        max_prompt: PromptTemplate = get_biggest_prompt([text_qa_template, refine_template])
+        
+        # Get prompt_helper from synthesizer or create one
+        # PromptHelper knows context_window size and handles token counting/packing
+        prompt_helper: PromptHelper
+        if hasattr(self._response_synthesizer, '_prompt_helper'):
+            prompt_helper = self._response_synthesizer._prompt_helper
+        else:
+            llm: LLM = self._response_synthesizer._llm
+            prompt_helper = PromptHelper.from_llm_metadata(llm.metadata)
+        
+        # Repack text chunks to fit context window
+        # Returns List[str] - if all fits, single element; if overflow, multiple elements
+        packed_chunks: List[str] = prompt_helper.repack(
+            max_prompt, 
+            text_chunks, 
+            llm=self._response_synthesizer._llm
+        )
+        
+        # Step 5: Handle context overflow
+        # If packed_chunks has multiple elements, it means context is too large for
+        # a single LLM call. CompactAndRefine would make multiple calls with refinement,
+        # but for streaming we only use the first chunk.
+        # See documents/TODO.md for details on this limitation.
+        context_overflow: bool = len(packed_chunks) > 1
+        if context_overflow:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"Context overflow in streaming: {len(packed_chunks)} chunks needed, "
+                f"but only using first chunk. Consider reducing top_k or chunk_size. "
+                f"CompactAndRefine would use refinement loop for remaining {len(packed_chunks) - 1} chunks."
+            )
+        
+        # Use only the first packed chunk for streaming (fits in context window)
+        context_str: str = packed_chunks[0] if packed_chunks else ""
+        
+        # Step 6: Format final prompt - complete prompt string ready for LLM
+        prompt: str = CITATION_QA_TEMPLATE.format(
+            context_str=context_str,
+            query_str=query,
+        )
+        
+        return {
+            "prompt": prompt,
+            "citation_nodes": citation_nodes,
+            "context_str": context_str,
+            "context_overflow": context_overflow,
+            "total_chunks": len(packed_chunks),
+        }
 
     @property
     def retriever(self) -> BaseRetriever:

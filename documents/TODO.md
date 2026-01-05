@@ -18,15 +18,25 @@
 * `IngestionClient.url_cache` tracks URLs globally, not per-session
 * If URL is ingested for session A, it's skipped for session B (even though B has no documents)
 * Fix: Track (url, session_id) pairs, or re-ingest with different session_id
-## Finish Task 2
-* citation footnotes: No need. Fully in-text citation
-* URL link should be inserted in a specific format, determined by Ozzy for rendering 
 
-## Begin Task 3, 4 in requirments_design.md
+## Async Streaming: Context Overflow Not Fully Handled
+* **Location**: `CitationQueryEngine.prepare_streaming_context()`
+* **Issue**: When retrieved context exceeds LLM's context window, `CompactAndRefine` makes multiple LLM calls with a refinement loop:
+  ```
+  Call 1: QA_TEMPLATE + packed_chunk[0] → initial_answer
+  Call 2: REFINE_TEMPLATE + initial_answer + packed_chunk[1] → refined_answer
+  Call N: REFINE_TEMPLATE + prev_answer + packed_chunk[N-1] → final_answer
+  ```
+* **Current workaround**: For async streaming, we only use `packed_chunks[0]` and log a warning. This means some retrieved context may be dropped.
+* **Why it's usually OK**: Claude 3.5 has 200K context window. With typical settings (top_k=5-10, chunk_size=512), overflow is rare.
+* **Full fix options**:
+  1. Implement async refinement loop (complex: stream first chunk, collect, stream refinement)
+  2. Reduce top_k dynamically if overflow detected
+  3. Use tree_summarize to compress context before streaming
 
-## Check (Not Systematic Evaluation)
-* time usage of 1) Ingestion; 2) Retrieval; 2) Citation-Grounded Generation; 3) Memory Retrieval
-* the accuracy of references across multiple documents
+
+
+
 
 # Important but Not Emergent Tasks
 ## Agentic RAG
@@ -49,3 +59,15 @@ Step 5: 输出最终回答
 ## Caching
 do not re-embed same chunk text if re-attached within a session or other sessions
 
+<!-- ====== Finished =======
+
+## Task 2
+* citation footnotes: No need. Fully in-text citation
+* URL link should be inserted in a specific format, determined by Ozzy for rendering 
+
+## Begin Task 3, 4 in requirments_design.md
+
+## Check (Not Systematic Evaluation)
+* time usage of 1) Ingestion; 2) Retrieval; 2) Citation-Grounded Generation; 3) Memory Retrieval
+* the accuracy of references across multiple documents
+======================= -->
