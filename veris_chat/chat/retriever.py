@@ -22,7 +22,7 @@ Usage (low-level):
 
 import logging
 import os
-from typing import List, Optional
+from typing import List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +177,58 @@ def retrieve_with_session_filter(
     return nodes
 
 
+def retrieve_with_url_filter(
+    index: VectorStoreIndex,
+    query: str,
+    urls: Set[str],
+    top_k: int = 5,
+) -> List[NodeWithScore]:
+    """
+    Retrieve relevant chunks filtered by URL list (MatchAny).
+    
+    This is the preferred method for session-scoped retrieval since session_index
+    tracks session_id → Set[url] mapping separately from Qdrant.
+    
+    Args:
+        index: VectorStoreIndex connected to Qdrant.
+        query: User query string.
+        urls: Set of URLs to filter chunks by.
+        top_k: Number of top results to return.
+        
+    Returns:
+        List of NodeWithScore objects containing retrieved chunks with scores.
+        Empty list if urls is empty.
+    """
+    if not urls:
+        logger.warning("[RETRIEVER] Empty URL set, returning empty results")
+        return []
+    
+    url_list = list(urls)
+    logger.info(f"[RETRIEVER] Retrieving with {len(url_list)} URLs, top_k={top_k}")
+    logger.debug(f"[RETRIEVER] Query: {query[:100]}...")
+    logger.debug(f"[RETRIEVER] URLs: {url_list[:3]}{'...' if len(url_list) > 3 else ''}")
+    
+    # Build Qdrant filter for URL list using MatchAny
+    qdrant_filter = qdrant_models.Filter(
+        must=[
+            qdrant_models.FieldCondition(
+                key="url",
+                match=qdrant_models.MatchAny(any=url_list),
+            )
+        ]
+    )
+    
+    # Create retriever with URL filter
+    retriever = index.as_retriever(
+        similarity_top_k=top_k,
+        vector_store_kwargs={"qdrant_filters": qdrant_filter},
+    )
+    
+    nodes = retriever.retrieve(query)
+    logger.info(f"[RETRIEVER] Retrieved {len(nodes)} nodes for {len(url_list)} URLs")
+    return nodes
+
+
 def retrieve_nodes_metadata(nodes: List[NodeWithScore]) -> List[dict]:
     """
     Extract metadata from retrieved nodes for citation purposes.
@@ -255,6 +307,75 @@ def retrieve_for_session(
         index=index,
         query=query,
         session_id=session_id,
+        top_k=top_k,
+    )
+    
+    # 3. Extract metadata for citations
+    return retrieve_nodes_metadata(nodes)
+
+
+def retrieve_for_urls(
+    query: str,
+    urls: Set[str],
+    top_k: int = 5,
+    collection_name: Optional[str] = None,
+    embed_model=None,
+    storage_path: str = "./qdrant_local",
+) -> List[dict]:
+    """
+    High-level retrieval function using URL list filter (preferred method).
+    
+    This is the new preferred entry point for session-scoped retrieval, using
+    URL list from session_index instead of session_id filter in Qdrant.
+    
+    Workflow:
+    1. get_vector_index() - create index connected to Qdrant
+    2. retrieve_with_url_filter() - retrieve nodes filtered by URL list
+    3. retrieve_nodes_metadata() - extract citation metadata
+    
+    Args:
+        query: User query string.
+        urls: Set of URLs to filter chunks by (from session_index).
+        top_k: Number of top results to return.
+        collection_name: Qdrant collection name. If None, loads from config.yaml.
+        embed_model: LlamaIndex embedding model. If None, creates from config.
+        storage_path: Path for local Qdrant storage if not using cloud.
+        
+    Returns:
+        List of dicts with citation metadata: filename, page_number, url, chunk_index, text, score.
+        
+    Example:
+        from veris_chat.ingestion.main_client import IngestionClient
+        
+        client = IngestionClient()
+        urls = client.get_session_urls("session_123")  # Get URLs from session_index
+        
+        results = retrieve_for_urls(
+            query="What is the site status?",
+            urls=urls,
+            top_k=5,
+        )
+        for r in results:
+            print(f"{r['filename']} (p.{r['page_number']}): {r['text'][:100]}...")
+    """
+    logger.info(f"[RETRIEVER] retrieve_for_urls: {len(urls)} URLs, top_k={top_k}")
+    
+    if not urls:
+        logger.warning("[RETRIEVER] No URLs provided, returning empty results")
+        return []
+    
+    # 1. Get vector index
+    index = get_vector_index(
+        collection_name=collection_name,
+        embed_model=embed_model,
+        storage_path=storage_path,
+    )
+    
+    # 2. Retrieve with URL filter
+    nodes = retrieve_with_url_filter(
+        index=index,
+        query=query,
+        urls=urls,
         top_k=top_k,
     )
     

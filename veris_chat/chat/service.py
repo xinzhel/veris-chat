@@ -56,7 +56,7 @@ from veris_chat.chat.retriever import (
     retrieve_nodes_metadata,
 )
 from veris_chat.ingestion.main_client import IngestionClient
-from veris_chat.utils.citation_query_engine import CitationQueryEngine
+from veris_chat.utils.citation_query_engine import CitationQueryEngine, NoOpRetriever
 from veris_chat.utils.logger import print_timing_summary
 
 logger = logging.getLogger(__name__)
@@ -117,28 +117,46 @@ def _create_session_retriever(
     top_k: int,
 ):
     """
-    Create a retriever with session-scoped filter.
+    Create a retriever with session-scoped URL filter.
+    
+    Uses session_index to get URLs associated with the session,
+    then creates a retriever with MatchAny filter on those URLs.
+    
+    If no URLs exist for the session, returns a NoOpRetriever that allows
+    the CitationQueryEngine to still generate responses (without citations)
+    based on the LLM's general knowledge and conversation context.
     
     Args:
-        session_id: Session ID for filtering.
+        session_id: Session ID for URL lookup.
         config: Application configuration.
         embed_model: Embedding model for vector index.
         top_k: Number of top results to retrieve.
         
     Returns:
-        Retriever with session filter applied.
+        Retriever with URL filter applied, or NoOpRetriever if no documents.
     """
+    # Get URLs for this session from session_index
+    ingestion_client = _get_ingestion_client(config)
+    urls = ingestion_client.get_session_urls(session_id)
+    
+    if not urls:
+        logger.info(f"[SERVICE] No documents in session {session_id}, using NoOpRetriever")
+        return NoOpRetriever()
+    
+    logger.info(f"[SERVICE] Session {session_id} has {len(urls)} URLs")
+    
     qdrant_cfg = config.get("qdrant", {})
     index = get_vector_index(
         collection_name=qdrant_cfg.get("collection_name", "veris_pdfs"),
         embed_model=embed_model,
     )
     
+    # Use MatchAny filter on URL list instead of session_id
     qdrant_filter = qdrant_models.Filter(
         must=[
             qdrant_models.FieldCondition(
-                key="session_id",
-                match=qdrant_models.MatchValue(value=session_id),
+                key="url",
+                match=qdrant_models.MatchAny(any=list(urls)),
             )
         ]
     )
@@ -366,8 +384,10 @@ def chat(
         timing["ingestion"] = _ingest_documents(document_urls, session_id, config)
     
     # Step 2: Create retriever and query engine
+    # NoOpRetriever is used if session has no documents - LLM can still respond
     logger.info(f"[SERVICE] Creating index and query engine...")
     retriever = _create_session_retriever(session_id, config, embed_model, top_k)
+    
     engine = CitationQueryEngine(
         retriever=retriever,
         llm=llm,

@@ -30,6 +30,39 @@ from llama_index.core.schema import (
 from llama_index.core.settings import Settings
 from llama_index.core.prompts.prompt_utils import get_biggest_prompt
 
+
+# =============================================================================
+# NO-OP RETRIEVER FOR NO-DOCUMENT MODE
+# =============================================================================
+
+
+class NoOpRetriever(BaseRetriever):
+    """
+    A no-operation retriever that returns empty results.
+    
+    Use this when a session has no documents but you still want to use
+    CitationQueryEngine for generation (e.g., general knowledge questions,
+    conversation context from memory).
+    
+    The CitationQueryEngine handles empty retrieval results gracefully -
+    the LLM will answer based on its knowledge and conversation context
+    without document citations.
+    
+    Usage:
+        retriever = NoOpRetriever()
+        engine = CitationQueryEngine(retriever=retriever, llm=llm)
+        response = engine.query("What is Python?")  # No citations, general answer
+    """
+    
+    def _retrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
+        """Return empty list - no documents to retrieve."""
+        return []
+    
+    async def _aretrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
+        """Return empty list - no documents to retrieve."""
+        return []
+
+
 # =============================================================================
 # IN-TEXT CITATION WITH MARKDOWN LINKS
 # =============================================================================

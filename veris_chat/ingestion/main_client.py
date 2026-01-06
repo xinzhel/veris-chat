@@ -16,7 +16,7 @@ import uuid
 import json
 import time
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 from pathlib import Path
 import logging
 
@@ -92,11 +92,13 @@ class IngestionClient:
             logger.info("[QDRANT] Using local Qdrant (embedded) storage.")
             self.qdrant = QdrantClient(path=str(self.storage_path))
 
-        # Track processed URLs
+        # Track processed URLs and session mappings
         self.cache_file = self.pdf_dir / "url_cache.json"
-        self.url_cache = {}  
+        self.session_index_file = self.pdf_dir / "session_index.json"
+        self.url_cache: Dict[str, Any] = {}  # url → {local_path, ingestion_time, ...}
+        self.session_index: Dict[str, Set[str]] = {}  # session_id → Set[url]
         self._load_url_cache()
-        # URL cache will be loaded after collection exists (once embedder is ready)
+        self._load_session_index()
         
         if self.embedding_dim:
             logger.info("[QDRANT] Ensure collection")
@@ -155,18 +157,72 @@ class IngestionClient:
                 ),
             )
         
-        # Create keyword indexes for efficient filtered queries.
-        for field_name in ["url", "session_id"]:
+        # Create keyword index on 'url' for efficient filtered queries.
+        # Note: session_id is now tracked in session_index, not in Qdrant payload
+        try:
+            self.qdrant.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="url",
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
+            logger.info(f"[QDRANT] Created keyword index on 'url' field")
+        except Exception as e:
+            # Index might already exist, which is fine
+            logger.debug(f"[QDRANT] Index creation for 'url' skipped or failed: {e}")
+    
+    # ------------------------------------------------------------------
+    # Session Index: session_id → Set[url]
+    # ------------------------------------------------------------------
+    def _load_session_index(self):
+        """Load session_id → Set[url] mapping from JSON."""
+        if self.session_index_file.exists():
             try:
-                self.qdrant.create_payload_index(
-                    collection_name=self.collection_name,
-                    field_name=field_name,
-                    field_schema=PayloadSchemaType.KEYWORD,
-                )
-                logger.info(f"[QDRANT] Created keyword index on '{field_name}' field")
+                with open(self.session_index_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                # Convert lists back to sets
+                self.session_index = {k: set(v) for k, v in data.items()}
+                logger.info(f"[SESSION] Loaded {len(self.session_index)} sessions from {self.session_index_file}")
             except Exception as e:
-                # Index might already exist, which is fine
-                logger.debug(f"[QDRANT] Index creation for '{field_name}' skipped or failed: {e}")
+                logger.error(f"[SESSION] Failed reading {self.session_index_file}: {e}")
+                self.session_index = {}
+        else:
+            logger.info("[SESSION] No session_index.json found. Starting empty.")
+            self.session_index = {}
+    
+    def _save_session_index(self):
+        """Persist session_id → Set[url] mapping to JSON."""
+        try:
+            # Convert sets to lists for JSON serialization
+            data = {k: list(v) for k, v in self.session_index.items()}
+            with open(self.session_index_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            logger.info(f"[SESSION] Saved session index to {self.session_index_file}")
+        except Exception as e:
+            logger.error(f"[SESSION] Failed to save session index: {e}")
+    
+    def get_session_urls(self, session_id: str) -> Set[str]:
+        """
+        Get all URLs associated with a session.
+        
+        Args:
+            session_id: Session identifier.
+            
+        Returns:
+            Set of URLs for this session (empty set if session not found).
+        """
+        return self.session_index.get(session_id, set())
+    
+    def add_url_to_session(self, session_id: str, url: str) -> None:
+        """
+        Add a URL to a session's URL set.
+        
+        Args:
+            session_id: Session identifier.
+            url: URL to add to the session.
+        """
+        if session_id not in self.session_index:
+            self.session_index[session_id] = set()
+        self.session_index[session_id].add(url)
         
     def _save_url_cache(self):
         """Persist URL → local_path mapping to data/url_cache.json."""
@@ -257,14 +313,16 @@ class IngestionClient:
         )
         return parsed_pages
 
-    def _index_document(self, url: str, parsed_pages: List[dict], session_id: Optional[str] = None):
+    def _index_document(self, url: str, parsed_pages: List[dict]):
         """
         Chunk parsed pages, embed chunks, and index into Qdrant.
 
         Args:
             url: Original document URL
             parsed_pages: List of parsed page dicts from _download_parse_pdf
-            session_id: Optional session identifier for session-scoped retrieval
+        
+        Note: session_id is NOT stored in Qdrant payload. Session-URL mapping
+        is tracked separately in session_index for efficient multi-session support.
         """
         if not parsed_pages:
             logger.warning(f"[INGEST] No pages parsed for URL: {url}")
@@ -291,12 +349,11 @@ class IngestionClient:
                 f"Embedding count {len(embeddings)} does not match chunk count {len(chunks)}"
             )
 
-        # Prepare Qdrant points
+        # Prepare Qdrant points (no session_id in payload)
         points: List[PointStruct] = []
         for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
             point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{url}#{idx}"))
             payload = {
-                "session_id": session_id,
                 "url": url,
                 "filename": chunk.get("filename"),
                 "page_number": chunk.get("page_number"),
@@ -330,17 +387,28 @@ class IngestionClient:
         """
         Ingest a PDF document from URL into the vector store.
 
-        If the URL has already been processed, ingestion is skipped.
+        Ingestion workflow:
+        1. Always add URL to session_index for the given session_id
+        2. Only run full ingestion (download, parse, embed, store) if URL not in url_cache
+        
+        This means: same URL in 2 sessions = 1x Qdrant storage (chunks are shared)
 
         Args:
             url: URL of the PDF document to ingest.
             session_id: Optional session identifier for session-scoped retrieval.
-                        When provided, chunks are tagged with this session_id in payload.
+                        URL is tracked in session_index, NOT in Qdrant payload.
         """
         self._initialize_embedder()
 
+        # Step 1: Always add URL to session_index (even if already in url_cache)
+        if session_id:
+            self.add_url_to_session(session_id, url)
+            self._save_session_index()
+            logger.info(f"[SESSION] Added URL to session '{session_id}': {url}")
+        
+        # Step 2: Only ingest if URL not in url_cache
         if url in self.url_cache:
-            logger.info(f"[INGEST] URL already processed, skipping: {url}")
+            logger.info(f"[INGEST] URL already ingested (chunks exist), skipping: {url}")
             return
 
         t_start = time.perf_counter()
@@ -354,18 +422,19 @@ class IngestionClient:
             filename = parsed_pages[0].get("filename", "")
             local_path = str(self.pdf_dir / filename) if filename else None
         
-        self._index_document(url, parsed_pages, session_id=session_id)
+        # Index document (no session_id in Qdrant payload)
+        self._index_document(url, parsed_pages)
         
         ingestion_time = time.perf_counter() - t_start
         
-        # Update cache with (local_path, ingestion_time)
+        # Update url_cache with ingestion metadata
         self.url_cache[url] = {
             "local_path": local_path,
             "ingestion_time": round(ingestion_time, 3),
             "ingested_at": datetime.now().isoformat(),
         }
         self._save_url_cache()
-        logger.info(f"[INGEST] URL cached after successful indexing: {url} (took {ingestion_time:.2f}s)")
+        logger.info(f"[INGEST] URL ingested and cached: {url} (took {ingestion_time:.2f}s)")
 
     def retrieve(self, query: str, url: Optional[str] = None, top_k: int = 3) -> Dict[str, Any]:
         """
