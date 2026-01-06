@@ -45,11 +45,10 @@ from llama_index.embeddings.bedrock import BedrockEmbedding
 from llama_index.llms.bedrock import Bedrock
 from llama_index.llms.bedrock_converse import BedrockConverse
 
-from qdrant_client.http import models as qdrant_models
-
 from veris_chat.chat.config import load_config, get_bedrock_kwargs
 from veris_chat.chat.retriever import (
     get_vector_index,
+    get_url_filtered_retriever,
     retrieve_with_session_filter,
     format_citations_for_response,
     get_session_memory,
@@ -120,7 +119,8 @@ def _create_session_retriever(
     Create a retriever with session-scoped URL filter.
     
     Uses session_index to get URLs associated with the session,
-    then creates a retriever with MatchAny filter on those URLs.
+    then delegates to get_url_filtered_retriever() to create the
+    retriever with MatchAny filter on those URLs.
     
     If no URLs exist for the session, returns a NoOpRetriever that allows
     the CitationQueryEngine to still generate responses (without citations)
@@ -151,20 +151,8 @@ def _create_session_retriever(
         embed_model=embed_model,
     )
     
-    # Use MatchAny filter on URL list instead of session_id
-    qdrant_filter = qdrant_models.Filter(
-        must=[
-            qdrant_models.FieldCondition(
-                key="url",
-                match=qdrant_models.MatchAny(any=list(urls)),
-            )
-        ]
-    )
-    
-    return index.as_retriever(
-        similarity_top_k=top_k,
-        vector_store_kwargs={"qdrant_filters": qdrant_filter},
-    )
+    # Delegate URL filter logic to retriever.py (single source of truth)
+    return get_url_filtered_retriever(index, urls, top_k)
 
 
 def _get_memory_context(

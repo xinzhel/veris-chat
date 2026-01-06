@@ -182,6 +182,51 @@ def retrieve_with_session_filter(
     return nodes
 
 
+def get_url_filtered_retriever(
+    index: VectorStoreIndex,
+    urls: Set[str],
+    top_k: int = 5,
+):
+    """
+    Create a retriever with URL list filter (MatchAny).
+    
+    Returns the retriever object (not executed results) for use with
+    CitationQueryEngine or other components that need a retriever.
+    
+    Args:
+        index: VectorStoreIndex connected to Qdrant.
+        urls: Set of URLs to filter chunks by.
+        top_k: Number of top results to return.
+        
+    Returns:
+        VectorIndexRetriever with URL filter applied.
+        None if urls is empty.
+    """
+    if not urls:
+        logger.warning("[RETRIEVER] Empty URL set, cannot create retriever")
+        return None
+    
+    url_list = list(urls)
+    logger.info(f"[RETRIEVER] Creating retriever with {len(url_list)} URLs, top_k={top_k}")
+    logger.debug(f"[RETRIEVER] URLs: {url_list[:3]}{'...' if len(url_list) > 3 else ''}")
+    
+    # Build Qdrant filter for URL list using MatchAny
+    qdrant_filter = qdrant_models.Filter(
+        must=[
+            qdrant_models.FieldCondition(
+                key="url",
+                match=qdrant_models.MatchAny(any=url_list),
+            )
+        ]
+    )
+    
+    # Create retriever with URL filter
+    return index.as_retriever(
+        similarity_top_k=top_k,
+        vector_store_kwargs={"qdrant_filters": qdrant_filter},
+    )
+
+
 def retrieve_with_url_filter(
     index: VectorStoreIndex,
     query: str,
@@ -204,33 +249,13 @@ def retrieve_with_url_filter(
         List of NodeWithScore objects containing retrieved chunks with scores.
         Empty list if urls is empty.
     """
-    if not urls:
-        logger.warning("[RETRIEVER] Empty URL set, returning empty results")
+    retriever = get_url_filtered_retriever(index, urls, top_k)
+    if retriever is None:
         return []
     
-    url_list = list(urls)
-    logger.info(f"[RETRIEVER] Retrieving with {len(url_list)} URLs, top_k={top_k}")
     logger.debug(f"[RETRIEVER] Query: {query[:100]}...")
-    logger.debug(f"[RETRIEVER] URLs: {url_list[:3]}{'...' if len(url_list) > 3 else ''}")
-    
-    # Build Qdrant filter for URL list using MatchAny
-    qdrant_filter = qdrant_models.Filter(
-        must=[
-            qdrant_models.FieldCondition(
-                key="url",
-                match=qdrant_models.MatchAny(any=url_list),
-            )
-        ]
-    )
-    
-    # Create retriever with URL filter
-    retriever = index.as_retriever(
-        similarity_top_k=top_k,
-        vector_store_kwargs={"qdrant_filters": qdrant_filter},
-    )
-    
     nodes = retriever.retrieve(query)
-    logger.info(f"[RETRIEVER] Retrieved {len(nodes)} nodes for {len(url_list)} URLs")
+    logger.info(f"[RETRIEVER] Retrieved {len(nodes)} nodes for {len(urls)} URLs")
     return nodes
 
 
