@@ -62,10 +62,28 @@ async def test_async_chat_streaming():
     log_print("Test 1: Async Streaming Chat")
     log_print("=" * 60)
     
-    from veris_chat.chat.service import async_chat, clear_cache
-    
-    # Clear cache for clean test
-    clear_cache()
+    from veris_chat.chat.service import async_chat
+    from veris_chat.ingestion.main_client import IngestionClient
+    from veris_chat.chat.config import load_config
+
+    # -----------------------------------------------------------------------------
+    # Reset collection for clean test state
+    # -----------------------------------------------------------------------------
+    log_print("\n[Reset] Resetting Qdrant collection and session index...")
+    config = load_config()
+    models_cfg = config["models"]
+    qdrant_cfg = config["qdrant"]
+    chunking_cfg = config["chunking"]
+    client = IngestionClient(
+        embedding_model=models_cfg.get("embedding_model"),
+        embedding_dim=qdrant_cfg.get("vector_size"),
+        chunk_size=chunking_cfg.get("chunk_size", 512),
+        chunk_overlap=chunking_cfg.get("overlap", 50),
+    )
+
+    reset_result = client.reset_collection(delete_pdfs=False)
+    log_print(f"  ✓ Collection reset in {reset_result['elapsed_time']:.2f}s")
+    log_print(f"  Deleted PDFs: {reset_result['deleted_pdfs_count']}")
     
     message = "What is the purpose of this document? Provide a brief summary."
     

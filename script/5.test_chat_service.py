@@ -7,9 +7,18 @@ Tests:
 3. Citation extraction and formatting
 4. Timing breakdown
 
-Prerequisites: Qdrant must be accessible (local or cloud).
 
-Usage: Run in interactive notebook mode or as a script.
+Relationship with Task 7.4 redesign:
+
+This test uses the redesigned architecture but is already compatible because:
+
+Test 1 (ingestion): Calls chat(..., document_urls=TEST_URLS) → internally uses store(url, session_id) which now adds URL to session_index and ingests if not in url_cache ✓
+
+Test 2 (follow-up): Calls chat(..., document_urls=None) with same session_id → internally uses _create_session_retriever() which looks up URLs from session_index ✓
+
+Test 3 (memory): Uses same TEST_SESSION_ID → documents already associated in session_index ✓
+
+Test 4 (citation styles): Same pattern as Test 2 ✓
 """
 
 import os
@@ -19,8 +28,6 @@ import sys
 os.environ["AWS_REGION"] = "ap-southeast-2"
 
 sys.path.insert(0, ".")
-
-from veris_chat.chat.config import load_config
 from veris_chat.utils.logger import setup_logging, print_timing_summary
 
 # Setup logging
@@ -48,11 +55,6 @@ log_print("End-to-End Chat Service Test")
 log_print("=" * 60)
 
 # -----------------------------------------------------------------------------
-# Load configuration
-# -----------------------------------------------------------------------------
-log_print("\n[Setup] Loading configuration...")
-config = load_config()
-log_print("  ✓ Configuration loaded")
 
 # Test constants
 TEST_SESSION_ID = "test_chat_service_001"
@@ -70,6 +72,27 @@ log_print("\n[Cleanup] Clearing cached resources...")
 from veris_chat.chat.service import clear_cache
 clear_cache()
 log_print("  ✓ Cache cleared")
+
+# -----------------------------------------------------------------------------
+# Reset collection for clean test state
+# -----------------------------------------------------------------------------
+log_print("\n[Reset] Resetting Qdrant collection and session index...")
+from veris_chat.ingestion.main_client import IngestionClient
+from veris_chat.chat.config import load_config
+config = load_config()
+models_cfg = config["models"]
+qdrant_cfg = config["qdrant"]
+chunking_cfg = config["chunking"]
+client = IngestionClient(
+    embedding_model=models_cfg.get("embedding_model"),
+    embedding_dim=qdrant_cfg.get("vector_size"),
+    chunk_size=chunking_cfg.get("chunk_size", 512),
+    chunk_overlap=chunking_cfg.get("overlap", 50),
+)
+
+reset_result = client.reset_collection(delete_pdfs=False)
+log_print(f"  ✓ Collection reset in {reset_result['elapsed_time']:.2f}s")
+log_print(f"  Deleted PDFs: {reset_result['deleted_pdfs_count']}")
 
 # -----------------------------------------------------------------------------
 # Test 1: Chat with document ingestion

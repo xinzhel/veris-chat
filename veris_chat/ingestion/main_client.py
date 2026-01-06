@@ -184,7 +184,10 @@ class IngestionClient:
             logger.info(f"[RESET] Deleted {deleted_pdfs_count} PDFs in {self.pdf_dir}")
         
         # 5. Recreate empty collection with proper config
-        self._ensure_collection()
+        if self.embedding_dim is None:
+            self._initialize_embedder() # This will also call _ensure_collection()
+        else:
+            self._ensure_collection()
         
         elapsed_time = time.perf_counter() - t_start
         logger.info(f"[RESET] ⏱ ({elapsed_time:.3f}s) Collection reset complete")
