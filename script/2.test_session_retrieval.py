@@ -71,9 +71,10 @@ print("\n[2/4] Testing get_session_index...")
 
 from veris_chat.chat.retriever import (
     get_vector_index,
-    retrieve_with_session_filter,
+    retrieve_with_url_filter,  # NEW: URL-based filter
     retrieve_nodes_metadata,
 )
+from veris_chat.ingestion.main_client import IngestionClient  # NEW: Get session URLs
 
 index = get_vector_index(
     collection_name=TEST_COLLECTION,
@@ -85,17 +86,30 @@ print(f"  ✓ VectorStoreIndex created for collection: {TEST_COLLECTION}")
 print(f"  Index type: {type(index).__name__}")
 
 # -----------------------------------------------------------------------------
-# Test retrieve_with_session_filter
+# NEW: Get URLs from session_index
 # -----------------------------------------------------------------------------
-print("\n[3/4] Testing retrieve_with_session_filter...")
+print("\n[2.5/4] Getting URLs from session_index...")
+client = IngestionClient(
+    storage_path=TEST_STORAGE_PATH,
+    collection_name=TEST_COLLECTION,
+    embedding_model=models_cfg.get("embedding_model"),
+    embedding_dim=qdrant_cfg.get("vector_size"),
+)
+session_urls = client.get_session_urls(TEST_SESSION_ID)
+print(f"  ✓ Session '{TEST_SESSION_ID}' has {len(session_urls)} URLs")
+
+# -----------------------------------------------------------------------------
+# Test retrieve_with_url_filter
+# -----------------------------------------------------------------------------
+print("\n[3/4] Testing retrieve_with_url_filter...")
 
 query = "What is the purpose of this document?"
 print(f"  Query: {query}")
 
-nodes = retrieve_with_session_filter(
+nodes = retrieve_with_url_filter(
     index=index,
     query=query,
-    session_id=TEST_SESSION_ID,
+    urls=session_urls,  # NEW:Use URLs instead of session_id
     top_k=5,
 )
 
@@ -109,7 +123,7 @@ else:
         metadata = node.node.metadata or {}
         print(f"\n  Result {i}:")
         print(f"    Score: {node.score:.4f}")
-        print(f"    session_id: {metadata.get('session_id')}")
+        print(f"    url: {metadata.get('url')[:50]}...")
         print(f"    filename: {metadata.get('filename')}")
         print(f"    page_number: {metadata.get('page_number')}")
         print(f"    chunk_index: {metadata.get('chunk_index')}")
@@ -125,17 +139,17 @@ print("\n[4/4] Verifying session_id filtering...")
 all_valid = True
 for node in nodes:
     metadata = node.node.metadata or {}
-    node_session_id = metadata.get("session_id")
-    if node_session_id != TEST_SESSION_ID:
-        print(f"  ✗ session_id mismatch: expected {TEST_SESSION_ID}, got {node_session_id}")
+    node_url = metadata.get("url")
+    if node_url not in session_urls:
+        print(f"  ✗ URL not in session: {node_url[:50]}...")
         all_valid = False
 
 if all_valid and nodes:
-    print(f"  ✓ All {len(nodes)} nodes have correct session_id: {TEST_SESSION_ID}")
+    print(f"  ✓ All {len(nodes)} nodes have URLs belonging to session")
 elif not nodes:
     print("  ⚠ No nodes to verify (collection may be empty)")
 else:
-    raise AssertionError("session_id filtering verification failed")
+    raise AssertionError("URL filtering verification failed")
 
 # -----------------------------------------------------------------------------
 # Test retrieve_nodes_metadata helper
@@ -156,23 +170,16 @@ if nodes:
         print(f"    score: {first.get('score'):.4f}")
 
 # -----------------------------------------------------------------------------
-# Test retrieval with non-existent session_id (should return empty)
+# NEW: Test retrieval with non-existent URL set (should return empty)
 # -----------------------------------------------------------------------------
-print("\n[Extra] Testing retrieval with non-existent session_id...")
-
-fake_session_id = "non_existent_session_xyz"
-empty_nodes = retrieve_with_session_filter(
+print("\n[Extra] Testing retrieval with empty URL set...")
+empty_urls = set()
+empty_nodes = retrieve_with_url_filter(
     index=index,
     query=query,
-    session_id=fake_session_id,
+    urls=empty_urls,
     top_k=5,
 )
 
 if len(empty_nodes) == 0:
-    print(f"  ✓ Correctly returned 0 nodes for non-existent session: {fake_session_id}")
-else:
-    print(f"  ⚠ Unexpected: returned {len(empty_nodes)} nodes for non-existent session")
-
-print("\n" + "=" * 60)
-print("Session-scoped retrieval test completed!")
-print("=" * 60)
+    print(f"  ✓ Correctly returned 0 nodes for empty URL set")
