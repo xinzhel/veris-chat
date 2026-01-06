@@ -363,6 +363,27 @@ class Mem0Memory(BaseMem0):
         self._add_msgs_to_client_memory(messages[initial_chat_len:])
         self.primary_memory.set(messages)
 
-    def reset(self) -> None:
-        """Only reset chat history."""
+    def reset(self, reset_mem0: bool = False) -> None:
+        """
+        Reset chat history and optionally Mem0 long-term memory.
+        
+        Args:
+            reset_mem0: If True, also delete all memories from Mem0 for the current context
+                       (user_id/agent_id/run_id). Default is False to preserve long-term memory.
+                       
+        Warning:
+            For self-hosted Mem0 (Memory class), delete_all() has a bug - after deleting
+            filtered memories, it calls vector_store.reset() which DELETES AND RECREATES
+            the entire collection as empty. This means delete_all(user_id="alice") will:
+            1. Delete Alice's memories individually ✓
+            2. Then WIPE the entire collection (including other users' data) and recreate it empty ✗
+            
+            The collection still exists after reset (it's recreated), but with 0 points.
+            
+            This is safe in our architecture because we use per-session collections
+            (mem0_memory_{session_id}), so resetting one session's collection doesn't
+            affect other sessions. But be aware of this Mem0 behavior if sharing collections.
+        """
+        if reset_mem0 and self._client is not None and self.context is not None:
+            self._client.delete_all(**self.context.get_context())
         self.primary_memory.reset()
