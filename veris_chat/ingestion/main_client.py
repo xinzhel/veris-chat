@@ -101,7 +101,6 @@ class IngestionClient:
         self._load_session_index()
         
         if self.embedding_dim:
-            logger.info("[QDRANT] Ensure collection")
             self._ensure_collection()
 
     # ------------------------------------------------------------------
@@ -132,8 +131,72 @@ class IngestionClient:
         else:
             assert self.embedding_dim == self.encoder.embedding_dim, f"Mismatch embedding_dim."
 
+    def reset_collection(self, delete_pdfs: bool = False) -> Dict[str, Any]:
+        """
+        Delete the Qdrant collection and clear all related cache files.
+        
+        This is useful for testing or when you need a completely fresh start.
+        
+        Args:
+            delete_pdfs: If True, also delete downloaded PDF files in pdf_dir.
+                        Default False to preserve downloaded files.
+        
+        Clears:
+            - Qdrant collection (deleted and recreated empty)
+            - url_cache (in-memory + url_cache.json)
+            - session_index (in-memory + session_index.json)
+            - Optionally: PDF files in pdf_dir
+            
+        Returns:
+            Dict with reset metadata: {elapsed_time, deleted_pdfs_count}
+        """
+        t_start = time.perf_counter()
+        deleted_pdfs_count = 0
+        
+        logger.info(f"[RESET] Resetting collection '{self.collection_name}'...")
+        
+        # 1. Delete Qdrant collection
+        try:
+            self.qdrant.delete_collection(collection_name=self.collection_name)
+            logger.info(f"[RESET] Deleted Qdrant collection: {self.collection_name}")
+        except Exception as e:
+            logger.warning(f"[RESET] Collection may not exist: {e}")
+        
+        # 2. Clear url_cache (in-memory + file)
+        self.url_cache.clear()
+        if self.cache_file.exists():
+            self.cache_file.unlink()
+            logger.info(f"[RESET] Deleted url_cache file: {self.cache_file}")
+        
+        # 3. Clear session_index (in-memory + file)
+        self.session_index.clear()
+        if self.session_index_file.exists():
+            self.session_index_file.unlink()
+            logger.info(f"[RESET] Deleted session_index file: {self.session_index_file}")
+        
+        # 4. Optionally delete PDF files
+        if delete_pdfs and self.pdf_dir.exists():
+            # Delete all PDF files but keep the directory
+            for pdf_file in self.pdf_dir.glob("*.pdf"):
+                pdf_file.unlink()
+                deleted_pdfs_count += 1
+                logger.debug(f"[RESET] Deleted PDF: {pdf_file.name}")
+            logger.info(f"[RESET] Deleted {deleted_pdfs_count} PDFs in {self.pdf_dir}")
+        
+        # 5. Recreate empty collection with proper config
+        self._ensure_collection()
+        
+        elapsed_time = time.perf_counter() - t_start
+        logger.info(f"[RESET] ⏱ ({elapsed_time:.3f}s) Collection reset complete")
+        
+        return {
+            "elapsed_time": round(elapsed_time, 3),
+            "deleted_pdfs_count": deleted_pdfs_count,
+        }
+        
     def _ensure_collection(self):
         """Create collection if it doesn't exist and set up indexes."""
+        logger.info("[QDRANT] Ensure collection")
         if self.embedding_dim is None:
             raise ValueError(
                 "Embedding dimension is not set. Call _initialize_embedder() first."
@@ -397,6 +460,9 @@ class IngestionClient:
             url: URL of the PDF document to ingest.
             session_id: Optional session identifier for session-scoped retrieval.
                         URL is tracked in session_index, NOT in Qdrant payload.
+                        
+        Returns:
+            Dict with ingestion metadata: {local_path, ingestion_time, ingested_at, skipped}
         """
         self._initialize_embedder()
 
@@ -409,7 +475,7 @@ class IngestionClient:
         # Step 2: Only ingest if URL not in url_cache
         if url in self.url_cache:
             logger.info(f"[INGEST] URL already ingested (chunks exist), skipping: {url}")
-            return
+            return {**self.url_cache[url], "skipped": True}
 
         t_start = time.perf_counter()
         
@@ -434,7 +500,9 @@ class IngestionClient:
             "ingested_at": datetime.now().isoformat(),
         }
         self._save_url_cache()
-        logger.info(f"[INGEST] URL ingested and cached: {url} (took {ingestion_time:.2f}s)")
+        logger.info(f"[INGEST] ⏱ ({ingestion_time:.2f}s) URL ingested and cached: {url}")
+        
+        return {**self.url_cache[url], "skipped": False}
 
     def retrieve(self, query: str, url: Optional[str] = None, top_k: int = 3) -> Dict[str, Any]:
         """
@@ -446,8 +514,9 @@ class IngestionClient:
             top_k: Number of top results to return.
 
         Returns:
-            Dict containing query, url (if any), and matched chunks with scores.
+            Dict containing query, url (if any), matched chunks with scores, and retrieval_time.
         """
+        t_start = time.perf_counter()
         self._initialize_embedder()
 
         # Build Qdrant filter if URL is specified
@@ -490,11 +559,15 @@ class IngestionClient:
                 }
             )
 
+        retrieval_time = time.perf_counter() - t_start
+        logger.info(f"[RETRIEVE] ⏱ ({retrieval_time:.3f}s) Query completed: {len(chunks)} chunks")
+        
         return {
             "query": query,
             "url": url,
             "chunks": chunks,
             "num_results": len(chunks),
+            "retrieval_time": round(retrieval_time, 3),
         }
 
     def ping(self) -> bool:

@@ -142,7 +142,12 @@ def retrieve_with_session_filter(
     top_k: int = 5,
 ) -> List[NodeWithScore]:
     """
-    Retrieve relevant chunks filtered by session_id.
+    [DEPRECATED] Retrieve relevant chunks filtered by session_id.
+    
+    .. deprecated::
+        Use `retrieve_with_url_filter()` instead. The new architecture stores
+        session_id → URL mapping in session_index, not in Qdrant payload.
+    ...
     
     Args:
         index: VectorStoreIndex connected to Qdrant.
@@ -266,7 +271,7 @@ def retrieve_for_session(
     storage_path: str = "./qdrant_local",
 ) -> List[dict]:
     """
-    High-level retrieval function that coordinates index creation, retrieval, and metadata extraction.
+    [DEPRECATED] High-level retrieval function that coordinates index creation, retrieval, and metadata extraction.
     
     This is the main entry point for session-scoped retrieval, combining:
     1. get_vector_index() - create index connected to Qdrant

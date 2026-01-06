@@ -16,8 +16,7 @@
 
 ## URL Cache Not Session-Aware
 * `IngestionClient.url_cache` tracks URLs globally, not per-session
-* If URL is ingested for session A, it's skipped for session B (even though B has no documents)
-* Fix: Track (url, session_id) pairs, or re-ingest with different session_id
+* If URL is ingested for session A, it's skipped for session B and later the retrieval won't retrive for this url since all chunks for the url is attached to Session A
 
 ## Async Streaming: Context Overflow Not Fully Handled
 * **Location**: `CitationQueryEngine.prepare_streaming_context()`
