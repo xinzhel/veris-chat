@@ -50,9 +50,12 @@ def load_config(
     aws_access_key = os.getenv("AWS_ACCESS_KEY_ID", "")
     aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "")
     aws_session_token = os.getenv("AWS_SESSION_TOKEN", "")
+    
+    # Region from .env (default us-east-1 for Opus 4.5 access with us.* prefix)
     aws_region = os.getenv("AWS_REGION", "us-east-1")
 
     # Determine if using SSO (when env vars are empty)
+    # On EC2 with Instance Profile, credentials come from metadata service automatically
     use_sso = not (aws_access_key and aws_secret_key)
 
     config = {
@@ -82,6 +85,7 @@ def get_bedrock_kwargs(config: Dict[str, Any]) -> Dict[str, Any]:
     Build kwargs dict for LlamaIndex Bedrock components.
 
     If AWS credentials are empty, returns minimal kwargs to use SSO/default credentials.
+    This works for both local SSO development and EC2 Instance Profile deployment.
 
     Args:
         config: Configuration dict from load_config().
@@ -90,9 +94,10 @@ def get_bedrock_kwargs(config: Dict[str, Any]) -> Dict[str, Any]:
         Dict of kwargs for BedrockEmbedding or Bedrock LLM initialization.
     """
     aws_cfg = config.get("aws", {})
-    kwargs = {"region_name": aws_cfg.get("region", "ap-southeast-2")}
+    # Default to us-east-1 for Opus 4.5 access (RMIT SCP requires us.* prefix)
+    kwargs = {"region_name": aws_cfg.get("region", "us-east-1")}
 
-    # Only add explicit credentials if not using SSO
+    # Only add explicit credentials if not using SSO/Instance Profile
     if not aws_cfg.get("use_sso", True):
         kwargs["aws_access_key_id"] = aws_cfg.get("access_key_id")
         kwargs["aws_secret_access_key"] = aws_cfg.get("secret_access_key")

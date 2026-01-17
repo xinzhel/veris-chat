@@ -3,9 +3,15 @@ Test script for AWS Bedrock connectivity via LlamaIndex.
 
 Tests:
 1. BedrockEmbedding - text embedding generation
-2. Bedrock LLM - chat completion
+2. Bedrock LLM - chat completion (Claude Opus 4.5)
 
-Usage: Run in interactive notebook mode or as a script.
+Prerequisites:
+- AWS SSO login: `aws sso login --profile <your-profile>`
+- AWS_REGION=us-east-1 in .env (required for Opus 4.5 with us.* prefix)
+- Model ID: us.anthropic.claude-opus-4-5-20251101-v1:0 in config.yaml
+
+Usage: python script/test_bedrock_llamaindex.py
+conda run -n veris_vectordb python script/test_bedrock_llamaindex.py
 """
 
 import sys

@@ -9,13 +9,19 @@ Tests:
 
 import asyncio
 import os
+import sys
 import time
 
-# Set AWS region before imports
-os.environ["AWS_REGION"] = "ap-southeast-2"
+# Add project root to path for config import
+sys.path.insert(0, ".")
 
+from veris_chat.chat.config import load_config, get_bedrock_kwargs
 from llama_index.llms.bedrock_converse import BedrockConverse
 from llama_index.core.llms import ChatMessage
+
+# Load configuration from config.yaml and .env
+config = load_config()
+bedrock_kwargs = get_bedrock_kwargs(config)
 
 # For BedrockConverse API in ap-southeast-2, Claude 3.5 Sonnet v2 requires
 # a cross-region inference profile. Use the us. prefix for cross-region access.
@@ -24,7 +30,8 @@ from llama_index.core.llms import ChatMessage
 # of anthropic.claude-3-5-sonnet-20241022-v2:0 directly in ap-southeast-2.
 # Solution: Use the cross-region inference profile prefix us. 
 # → us.anthropic.claude-3-5-sonnet-20241022-v2:0
-MODEL = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+MODEL = config["models"]["streaming_model"]
+print(f"Testing with model: {MODEL}")
 
 
 async def test_astream_chat():
@@ -68,7 +75,7 @@ async def test_astream_chat():
     print("Test 1: astream_chat() - Async Streaming")
     print("=" * 60)
     
-    llm = BedrockConverse(model=MODEL)
+    llm = BedrockConverse(model=MODEL, **bedrock_kwargs)
     messages = [
         ChatMessage(role="user", content="Count from 1 to 5, one number per line."),
     ]
@@ -104,7 +111,7 @@ async def test_achat():
     print("Test 2: achat() - Async Non-Streaming")
     print("=" * 60)
     
-    llm = BedrockConverse(model=MODEL)
+    llm = BedrockConverse(model=MODEL, **bedrock_kwargs)
     messages = [
         ChatMessage(role="user", content="What is 2+2? Answer in one word."),
     ]
@@ -130,7 +137,7 @@ def test_sync_chat():
     print("Test 3: chat() - Sync Non-Streaming (comparison)")
     print("=" * 60)
     
-    llm = BedrockConverse(model=MODEL)
+    llm = BedrockConverse(model=MODEL, **bedrock_kwargs)
     messages = [
         ChatMessage(role="user", content="What is 2+2? Answer in one word."),
     ]
@@ -156,7 +163,7 @@ async def test_concurrent_requests():
     print("Test 4: Concurrent Async Requests")
     print("=" * 60)
     
-    llm = BedrockConverse(model=MODEL)
+    llm = BedrockConverse(model=MODEL, **bedrock_kwargs)
     
     async def single_request(name: str, question: str):
         messages = [ChatMessage(role="user", content=question)]
