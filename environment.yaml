@@ -21,6 +21,9 @@ dependencies:
     - llama-index-llms-bedrock-converse
     # for memory
     - mem0ai
+    # for API
+    - fastapi
+    - uvicorn
     
 
 
