@@ -70,3 +70,27 @@ do not re-embed same chunk text if re-attached within a session or other session
 * time usage of 1) Ingestion; 2) Retrieval; 2) Citation-Grounded Generation; 3) Memory Retrieval
 * the accuracy of references across multiple documents
 ======================= -->
+
+# Not Important and Not Emergent
+A few considerations:
+
+**Works fine as-is:**
+- API access via `http://<ec2-ip>:8000`
+- Instance Profile handles Bedrock auth
+- systemd keeps the app running
+
+**Optional improvements for customer-facing:**
+
+| Concern | Simple Fix |
+|---------|------------|
+| HTTPS | Add nginx reverse proxy + Let's Encrypt SSL |
+| Domain name | Point DNS to EC2 Elastic IP |
+| Downtime during updates | Use rolling restart or brief maintenance window |
+| High traffic | Increase instance size (t3.large → t3.xlarge) |
+
+**Not needed unless scaling:**
+- Load balancer (single instance is fine for moderate traffic)
+- Auto-scaling (manual scaling works for predictable load)
+- Docker/ECS (overkill for single app)
+
+For a research project or limited customer base, EC2 + systemd + optional nginx is perfectly adequate. Want me to proceed with the startup script?

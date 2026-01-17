@@ -1,0 +1,67 @@
+# EC2 Deployment Configuration for Veris-Chat
+# ============================================
+# This file documents the AWS resources and configuration needed for deployment.
+
+# Instance Configuration
+# ----------------------
+instance:
+  # Recommended instance type for veris-chat
+  # t3.medium: 2 vCPU, 4 GB RAM - suitable for light usage
+  # t3.large: 2 vCPU, 8 GB RAM - recommended for production
+  type: "t3.large"
+  
+  # Amazon Linux 2023 AMI (latest as of Jan 2026)
+  ami: "ami-07ff62358b87c7116"  # al2023-ami-2023.10.20260105.0-kernel-6.1-x86_64
+  
+  # Key pair for SSH access
+  key_name: "race_lits_server"
+
+# EBS Volume (Root Disk)
+# ----------------------
+storage:
+  # Root volume size in GB
+  # 8 GB default is too small for Python deps + PDFs
+  # 30 GB recommended for app + cached PDFs + logs
+  volume_size_gb: 30
+  volume_type: "gp3"  # General purpose SSD (better price/performance than gp2)
+
+# IAM Instance Profile
+# --------------------
+# The Instance Profile provides automatic credential rotation for Bedrock access.
+# Created by Dale (RACE) with AmazonBedrockFullAccess policy.
+iam:
+  instance_profile_name: "rmit-workload-veris"
+
+# Security Group Configuration
+# ----------------------------
+security_group:
+  # Existing security group (already created)
+  group_id: "sg-0fed3f02e16c4f50e"
+
+# Application Configuration
+# -------------------------
+application:
+  # Port the FastAPI app runs on
+  port: 8000
+  
+  # Working directory on EC2
+  app_dir: "/home/ec2-user/veris-chat"
+  
+  # Python version requirement
+  python_version: "3.10"
+  
+  # Process manager
+  process_manager: "systemd"
+  
+  # Service name for systemd
+  service_name: "veris-chat"
+
+# Deployment Checklist
+# --------------------
+# Before launching EC2:
+# [x] 1. Instance Profile: rmit-workload-veris
+# [ ] 2. Key pair: race_lits_server (needs to be created)
+#        aws ec2 create-key-pair --key-name race_lits_server --query 'KeyMaterial' --output text > ~/.ssh/race_lits_server.pem
+#        chmod 400 ~/.ssh/race_lits_server.pem
+# [x] 3. Security group: sg-0fed3f02e16c4f50e
+# [x] 4. AMI: ami-07ff62358b87c7116 (Amazon Linux 2023)
