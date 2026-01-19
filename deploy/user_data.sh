@@ -16,16 +16,30 @@
 # - Key pair: race_lits_server (for SSH access)
 # - Region: ap-southeast-2 (Sydney)
 #
-# | Instance | vCPU | Memory | Price/hour | Monthly (24/7) |
-# |----------|------|--------|------------|----------------|
-# | t3.medium | 2 | 4 GB | ~$0.052 | ~$38 |
-# | t3.large | 2 | 8 GB | ~$0.104 | ~$76 |
-# resize later if needed:
-# ```bash
-# aws ec2 stop-instances --instance-id <ID>
-# aws ec2 modify-instance-attribute --instance-id <ID> --instance-type t3.large
-# aws ec2 start-instances --instance-id <ID>
-# ```
+# AMI: Amazon Linux 2 vs Amazon Linux 2023
+# -----------------------------------------
+# | Feature        | Amazon Linux 2      | Amazon Linux 2023     |
+# |----------------|---------------------|-----------------------|
+# | Package Mgr    | yum                 | dnf                   |
+# | Default Python | 3.7                 | 3.9                   |
+# | Python Avail   | 3.7, 3.8 (extras)   | 3.9, 3.11, 3.12, 3.13 |
+# | Kernel         | 4.14 / 5.10         | 6.1                   |
+# | Based On       | RHEL 7 / CentOS 7   | Fedora                |
+# | Support Until  | June 2025           | 2028                  |
+# | Release Cycle  | Rolling updates     | Major version / 2 yrs |
+# | SELinux        | Disabled by default | Permissive by default |
+# Recommendation: Use AL2023 for new projects (longer support, newer packages)
+#
+# Instance Type Pricing (ap-southeast-2)
+# --------------------------------------
+# | Instance   | vCPU | Memory | Price/hour | Monthly (24/7) |
+# |------------|------|--------|------------|----------------|
+# | t3.medium  | 2    | 4 GB   | ~$0.052    | ~$38           |
+# | t3.large   | 2    | 8 GB   | ~$0.104    | ~$76           |
+# Resize later if needed:
+#   aws ec2 stop-instances --instance-id <ID>
+#   aws ec2 modify-instance-attribute --instance-id <ID> --instance-type t3.large
+#   aws ec2 start-instances --instance-id <ID>
 
 # EBS Volume (Root Disk)
 # ----------------------

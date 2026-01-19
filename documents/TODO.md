@@ -93,4 +93,9 @@ A few considerations:
 - Auto-scaling (manual scaling works for predictable load)
 - Docker/ECS (overkill for single app)
 
-For a research project or limited customer base, EC2 + systemd + optional nginx is perfectly adequate. Want me to proceed with the startup script?
+For a research project or limited customer base, EC2 + systemd + optional nginx is perfectly adequate. 
+
+| Method | When to Use |
+|--------|-------------|
+| ECS Fargate | If need auto-scaling or container orchestration |
+| Lambda + API Gateway | If usage is sporadic and cost is primary concern |
