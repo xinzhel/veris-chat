@@ -265,12 +265,12 @@ def _store_assistant_response(memory: Any, response: str) -> None:
 _cached_resources: Dict[str, Any] = {}
 
 
-def _get_models(config: Dict[str, Any]) -> tuple:
+def _get_embed_model(config: Dict[str, Any]) -> BedrockEmbedding:
     """
-    Get or create cached Bedrock embedding and LLM models.
+    Get or create cached Bedrock embedding model.
     
     Returns:
-        Tuple of (embed_model, llm)
+        BedrockEmbedding instance.
     """
     if "embed_model" not in _cached_resources:
         bedrock_kwargs = get_bedrock_kwargs(config)
@@ -280,21 +280,47 @@ def _get_models(config: Dict[str, Any]) -> tuple:
             model_name=models_cfg.get("embedding_model", "cohere.embed-english-v3"),
             **bedrock_kwargs,
         )
+        
+        _cached_resources["embed_model"] = embed_model
+        Settings.embed_model = embed_model
+        
+        logger.info(f"[SERVICE] Initialized embed model: {models_cfg.get('embedding_model')}")
+    
+    return _cached_resources["embed_model"]
+
+
+def _get_models(config: Dict[str, Any]) -> tuple:
+    """
+    Get or create cached Bedrock embedding and LLM models.
+    
+    Note: This uses the old Bedrock class for sync chat(). For async streaming,
+    use _get_streaming_llm() which uses BedrockConverse.
+    
+    Returns:
+        Tuple of (embed_model, llm)
+    """
+    embed_model = _get_embed_model(config)
+    
+    if "llm" not in _cached_resources:
+        bedrock_kwargs = get_bedrock_kwargs(config)
+        models_cfg = config.get("models", {})
+        
+        # Use Bedrock class for sync operations
+        # Note: For Opus 4.5, need to specify context_size as it's not in foundation model list
+        generation_model = models_cfg.get("generation_model", "anthropic.claude-3-5-sonnet-20240620-v1:0")
+        
         llm = Bedrock(
-            model=models_cfg.get("generation_model", "anthropic.claude-3-5-sonnet-20240620-v1:0"),
+            model=generation_model,
+            context_size=200000,  # Required for non-foundation models like Opus 4.5
             **bedrock_kwargs,
         )
         
-        _cached_resources["embed_model"] = embed_model
         _cached_resources["llm"] = llm
-        
-        # Set global settings
-        Settings.embed_model = embed_model
         Settings.llm = llm
         
-        logger.info(f"[SERVICE] Initialized models: embed={models_cfg.get('embedding_model')}, llm={models_cfg.get('generation_model')}")
+        logger.info(f"[SERVICE] Initialized LLM: {generation_model}")
     
-    return _cached_resources["embed_model"], _cached_resources["llm"]
+    return embed_model, _cached_resources["llm"]
 
 
 def _get_ingestion_client(config: Dict[str, Any]) -> IngestionClient:
@@ -452,33 +478,42 @@ def clear_cache():
 def _get_streaming_llm(config: Dict[str, Any]) -> BedrockConverse:
     """
     Get BedrockConverse LLM for async streaming.
-     
-    Note 1: BedrockConverse requires cross-region inference profile for Claude 3.5 Sonnet v2
-    in ap-southeast-2. The model ID is configured in config.yaml under models.streaming_model.
+    The model ID is configured in config.yaml under models.streaming_model.
     
-    Note 2: Cross-region inference profiles (model IDs starting with 'us.', 'eu.', etc.)
-    require NOT passing region_name explicitly - let boto3 use env/default credentials
-    to allow the cross-region routing to work.
-    
+    Notes on using Claude 3.5 Sonnet v2:
+        Note 1: BedrockConverse requires cross-region inference profile  (model IDs starting with 'us.', 'eu.', etc.)
+        for Claude 3.5 Sonnet v2 in ap-southeast-2. 
+        
+        Note 2: Cross-region inference profiles for using Claude 3.5 Sonnet v2
+        require NOT passing region_name explicitly - let boto3 use env/default credentials
+        to allow the cross-region routing to work.
+
+    Notes on using claude-opus-4-5-20251101-v1:0:
+        Note 1: For cross-region inference profiles, we still need to pass
+        region_name so BedrockConverse can look up model metadata, e.g., context_size
+
     Returns:
         BedrockConverse instance configured for streaming.
     """
     if "streaming_llm" not in _cached_resources:
         models_cfg = config.get("models", {})
         
-        # Get streaming model from config (defaults to cross-region inference profile)
+        # Get streaming model from config
         streaming_model = models_cfg.get(
             "streaming_model", 
             "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
         )
         
-        # For cross-region inference profiles (us., eu., etc.), do NOT pass region_name
-        # This allows boto3 to use the cross-region routing
-        if streaming_model.startswith(("us.", "eu.", "ap.")):
+        # Claude Sonnet 3.5: Don't pass region_name, use env var
+        # Claude Opus 4.5: Pass region_name explicitly
+        if "claude-3-5-sonnet" in streaming_model or "claude-3-sonnet" in streaming_model:
+            # Sonnet models: rely on AWS_REGION env var
             streaming_llm = BedrockConverse(model=streaming_model)
-            logger.info(f"[SERVICE] Initialized BedrockConverse (cross-region): {streaming_model}")
+            logger.info(f"[SERVICE] Initialized BedrockConverse (env region): {streaming_model}")
         else:
+            # Opus and other models: pass region_name
             bedrock_kwargs = get_bedrock_kwargs(config)
+            logger.info(f"[SERVICE] Creating BedrockConverse with model={streaming_model}, kwargs={bedrock_kwargs}")
             streaming_llm = BedrockConverse(model=streaming_model, **bedrock_kwargs)
             logger.info(f"[SERVICE] Initialized BedrockConverse: {streaming_model}")
         
@@ -537,7 +572,7 @@ async def async_chat(
     
     # Load configuration and initialize models
     config = load_config()
-    embed_model, _ = _get_models(config)  # Only need embed_model, not sync llm
+    embed_model = _get_embed_model(config)  # Only need embed_model for retrieval
     streaming_llm = _get_streaming_llm(config)
     
     # Step 1: Document Ingestion (sync - typically fast or cached)
@@ -582,6 +617,8 @@ async def async_chat(
     
     # Step 5: Stream Generation with BedrockConverse
     logger.info(f"[SERVICE] Starting streaming generation...")
+    logger.info(f"[SERVICE] Using LLM model: {streaming_llm.model}")
+    logger.info(f"[SERVICE] LLM region_name: {getattr(streaming_llm, 'region_name', 'NOT SET')}")
     t_generation_start = time.perf_counter()
     
     messages = [ChatMessage(role=MessageRole.USER, content=prompt)]

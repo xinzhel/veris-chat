@@ -22,11 +22,12 @@ curl -X POST http://localhost:8000/chat/stream/ -H "Content-Type: application/js
 """
 
 import os
+import traceback
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
-# Set AWS_REGION before other imports
-os.environ.setdefault("AWS_REGION", "ap-southeast-2")
+# Set AWS_REGION before other imports (us-east-1 required for Opus 4.5 with us.* prefix)
+os.environ.setdefault("AWS_REGION", "us-east-1")
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -189,6 +190,7 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
         
     except Exception as e:
         logger.error(f"[{timestamp}] /chat/ error: {e}")
+        logger.error(f"Traceback:\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -237,6 +239,7 @@ async def chat_stream_endpoint(request: ChatRequest):
                 
         except Exception as e:
             logger.error(f"[{timestamp}] /chat/stream/ error: {e}")
+            logger.error(f"Traceback:\n{traceback.format_exc()}")
             error_chunk = {
                 "id": formatter.completion_id,
                 "object": "chat.completion.chunk",

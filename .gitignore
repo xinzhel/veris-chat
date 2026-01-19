@@ -4,6 +4,9 @@
 data/
 qdrant*/
 
+# Deployment secrets (keep local only)
+deploy/user_data.sh
+
 # Data directories
 data/logs/
 data/csv/
