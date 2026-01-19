@@ -10,7 +10,9 @@ CURRENT_BRANCH=$(git branch --show-current)
 STASH_RESULT=$(git stash push -m "push_clean temp stash" 2>&1) || true
 
 git checkout --orphan temp-deploy
+git reset HEAD -- .kiro  # Exclude .kiro from staging
 git add -A
+git reset HEAD -- .kiro  # Ensure .kiro is not included
 git commit -m "Deployment $(date +%Y-%m-%d)"
 git branch -D deploy-clean 2>/dev/null || true
 git branch -m deploy-clean

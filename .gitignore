@@ -1,6 +1,6 @@
 # Environment variables
 .env
-.kiro/
+# .kiro/
 data/
 qdrant*/
 
