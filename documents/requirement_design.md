@@ -1,14 +1,15 @@
 # ✅ **Document-Grounded Conversational System**
 
-We are developping an interactive system where, for each **conversation session**, the user supplies a **small set of task-relevant document URLs**. These documents are:
+We are developing an interactive system where, for each **conversation session**, the user supplies a **small set of task-relevant document URLs**. These documents are:
 
 1. downloaded and parsed on-demand,
 2. chunked and embedded on-the-fly,
-3. stored in a **session-scoped ephemeral vector memory**, and
-4. queried repeatedly across multi-turn conversation with **conversation memory + citations**.
+3. stored in a **shared vector store** (indexed by URL, deduplicated across sessions), and
+4. queried with **session-scoped retrieval** (each session only sees its own documents) + **conversation memory + citations**.
 
+If no document URLs are provided, the system still responds using conversation memory and general LLM knowledge (no citations).
 
-* Request: Each request includes `session_id`.
+* Request: Each request includes `session_id`. `document_urls` is optional.
     ```json
     {
     "session_id": "a157",
@@ -17,30 +18,43 @@ We are developping an interactive system where, for each **conversation session*
     }
     ```
 * The system maintains:
-    * **Session memory** (chat history / mem0-style)
-    * **Session vector store** (documents attached to that session)
+    * **Session index** (`session_id → Set[url]`) — tracks which URLs belong to each session
+    * **URL cache** (`url → metadata`) — tracks ingestion state, avoids re-ingestion
+    * **Session memory** (chat history / mem0-style, per-session Qdrant collection)
+    * **Shared vector store** (documents indexed by URL, shared across sessions)
 
 * Structure of the repository:
     ```
     /documents/
         requirement_design.md (this file)
-        TODO.md (ignored)
+        TODO.md
+        async.md (sync vs async concurrency Q&A)
+        bedrock_caveats.md
 
     /veris_chat/ 
         chat/
+            config.py       (config loader)
+            retriever.py    (retrieval + memory + citation formatting)
+            service.py      (chat orchestration: sync chat() + async async_chat())
         ingestion/
+            main_client.py  (IngestionClient: download, parse, chunk, embed, store)
         utils/
-            citation_query_engine.py
-            memory.py
+            citation_query_engine.py  (customized CitationQueryEngine + NoOpRetriever)
+            memory.py       (customized Mem0Memory)
+            logger.py       (logging + timing utilities)
 
     /script/
-        (for each module in veris_rag, add a simple test script, which should be a naive Python code without testing wrapper or argparse, so that I can run it in an interactive notebook mode)
+        (test scripts, runnable in interactive notebook mode)
 
     /app/
-        chat_api.py  (FastAPI or similar)
+        chat_api.py  (FastAPI endpoints)
+
+    /deploy/
+        ec2_launch.sh   (EC2 launch script)
+        user_data.sh    (EC2 user-data setup)
+        push_clean.sh   (git push helper)
 
     config.yaml
-
     environment.yaml
     ```
 
@@ -49,247 +63,273 @@ We are developping an interactive system where, for each **conversation session*
 Below are the Core Capabilities.
 
 ## **1 Session-Attached, Multi-PDF Document Ingestion**
- If `document_urls` are provided for a session:
+
+If `document_urls` are provided for a session:
 
 * download PDFs (with local cache)
 * parse into per-page text + page_number
 * chunk into retrievable chunks
 * embed chunks
-* store vectors into Qdrant under session scope (collection or payload filter)
-* Required payload metadata per chunk
-    * `session_id`
-    * `url`
-    * `filename`
-    * `page_number`
-    * `chunk_id`
-    * `chunk_index`
-    * `section_header` (optional)
-    * `text`
-This part has been implemented in `veris_chat/ingestion`, exposing `IngestionClient` as the one-stop interface for ingestion.
+* store vectors into Qdrant (indexed by URL, NOT session_id)
+
+### **1.1 Session/URL Architecture (Separation of Concerns)**
+
+```
+Session Index:  session_id → Set[url]     (O(1) lookup)
+URL Cache:      url → {local_path, ingestion_time, ingested_at}
+Qdrant:         chunks indexed by url field (shared across sessions)
+```
+
+**Ingestion flow:**
+```python
+def store(url, session_id):
+    session_index[session_id].add(url)     # Always add to session
+    if url not in url_cache:               # Only ingest if never processed
+        download → parse → chunk → embed → store to Qdrant
+        url_cache[url] = metadata
+```
+
+**Benefits:**
+- Same URL in 2 sessions → 1x Qdrant storage (shared chunks)
+- Per-session deletion: remove from session_index only
+- Clean separation: ingestion knows nothing about sessions
+
+### **1.2 Qdrant Payload Metadata per Chunk**
+* `url`
+* `filename`
+* `page_number`
+* `chunk_id`
+* `chunk_index`
+* `section_header` (optional)
+* `text`
+
+Note: `session_id` is NOT stored in Qdrant payload. Session-URL mapping is tracked in `session_index.json`.
+
+### **1.3 IngestionClient API**
 
 ```python
 from veris_chat.ingestion.main_client import IngestionClient
-# Initialize Client with config settings
+
 client = IngestionClient(
-    storage_path="./qdrant_local",
-    collection_name=qdrant_cfg["collection_name"],
-    embedding_model=embedding_model,
-    embedding_dim=qdrant_cfg["vector_size"],
-    chunk_size=chunking_cfg["chunk_size"],
-    chunk_overlap=chunking_cfg["overlap"],
+    collection_name="veris_pdfs",
+    embedding_model="cohere.embed-english-v3",
+    embedding_dim=1024,
+    chunk_size=512,
+    chunk_overlap=50,
 )
-client.store(url)
+client.store(url, session_id="a157")
+
+# Session index queries
+urls = client.get_session_urls("a157")  # Set of URLs for session
+client.reset_collection()               # Full reset (Qdrant + caches)
 ```
 
-Note: the ingestion code is independent with the rest below. The rest of system is implemented directly under LlamaIndex without the complicated Python wrapper, specifically including the LlamaIndex support below: 
-* AWS Bedrock LLMs/embeddings,
-* Qdrant DB, 
-* conversation memory (source code is copied into `utils/memory.py` for more customization), and 
-* citation-grounded generation (source code is copied into `utils/citation_query_engine.py.py` for more customization).
+Note: The ingestion code is independent from the rest of the system. The rest is implemented directly under LlamaIndex, including:
+* AWS Bedrock LLMs/embeddings
+* Qdrant DB (via LlamaIndex's QdrantVectorStore)
+* Conversation memory (source code copied into `utils/memory.py` for customization)
+* Citation-grounded generation (source code copied into `utils/citation_query_engine.py` for customization)
+
+---
 
 ## **2 Retrieval-Augmented Generation**
 
 ### **2.1 Retrieval**
-Re-connect to Qdrant VectorDB via llamaindex interface as VectoStoreIndex, as shown below
+
+Retrieval uses URL-based filtering via `MatchAny`:
+
 ```python
-from llama_index.core.indices.vector_store.base import VectorStoreIndex
-from llama_index.vector_stores.qdrant import QdrantVectorStore
+# Get URLs for session from session_index
+urls = ingestion_client.get_session_urls(session_id)
 
-import qdrant_client
+# Build Qdrant filter
+filter = MatchAny(key="url", any=list(urls))
 
-client = qdrant_client.QdrantClient(
-    "<qdrant-url>",
-    api_key="<qdrant-api-key>", # For Qdrant Cloud, None for local instance
+# Retrieve via LlamaIndex
+retriever = index.as_retriever(
+    similarity_top_k=top_k,
+    vector_store_kwargs={"qdrant_filters": filter},
 )
-
-vector_store = QdrantVectorStore(client=client, collection_name="documents")
-index = VectorStoreIndex.from_vector_store(vector_store=vector_store)
 ```
 
-* Retrieval --- For each query request:
-    1. Determine the session’s vector memory:
-        * index-key filtering based on a filter `session_id == session_id`
-    2. Perform semantic search (top-K)
-    3. Return chunks + payload metadata
+**No-document sessions:** When `session_urls` is empty, a `NoOpRetriever` is used instead. The LLM can still respond using general knowledge and conversation memory, but without document citations.
 
-### **2.2 LLM Genration**
+### **2.2 LLM Generation**
 
 Inject:
-    * conversation memory context (session-scoped): see Section 4. Conversation Memory for detail.
-    * retrieved chunks (session-scoped)
-    * user query
+* conversation memory context (session-scoped): see Section 3
+* retrieved chunks (session-scoped via URL filter)
+* user query
 
-Requiring **Citation-Grounded Generation**, i.e., Responses **must include citations** referencing the source documents.
-* Each answer must reference the PDFs used during reasoning. Citations must be generated from metadata (the payload of each chunck)
-  * `filename`
-  * `page_number`
-  * `url`
-  * `chunk_index`
-* Citation format can be inline, e.g.,
-  `… as noted in {filename}.pdf (p. {page_number}).`
-* Must support multiple citation formats (inline / bracket / footnotes), but default is inline.
-* The system must expose the full set of source nodes used for each answer.
+Requiring **Citation-Grounded Generation**: Responses must include citations referencing the source documents.
+* Citations use inline markdown links: `[filename (p.X)](url)`
+* This format is clickable in frontend markdown renderers
+* The system exposes the full set of source nodes used for each answer
 
 ### **2.3 AWS Bedrock Integration under LlamaIndex**
- We need to connect to Bedrock under the support of both `aws sso login` and Access Keys. If the following environment variables are empty (which is set in `.env`), rely on `aws sso login`.
 
-AWS_ACCESS_KEY_ID=""
-AWS_SECRET_ACCESS_KEY=""
-AWS_SESSION_TOKEN=""
-
-NOTE: In `veris_chat/chat`, reduce wrapper functions like get_llm(), get_embed_model(), get_qdrant_client() since LlamaIndex already provides native support for these components 
-
+We connect to Bedrock supporting both `aws sso login` and Access Keys. If env vars are empty (set in `.env`), rely on SSO/Instance Profile.
 
 #### **2.3.1 Embedding model via AWS Bedrock**
 
-See the config.yaml. Below is the content of initial config.yaml:
-```yaml
-# Model settings
-models:
-  embedding_model: "cohere.embed-english-v3"  # AWS Bedrock embedding model
-  generation_model: "anthropic.claude-3-5-sonnet-20240620-v1:0"
-
-# Qdrant settings
-qdrant:
-  collection_name: "veris_pdfs"
-  vector_size: 1024  # Cohere embed-v4 dimension
-
-# Logging settings
-logging:
-  level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR
-  log_prefix: "rag" # followed by date; log is date-wise
-  console_output: true
-```
-
-Example Python code:
-
 ```python
 from llama_index.embeddings.bedrock import BedrockEmbedding
-embed_model = BedrockEmbedding(
-    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-    aws_session_token=os.getenv("AWS_SESSION_TOKEN"),
-    region_name="<aws-region>",
-    profile_name="<aws-profile>",
-)
-# or simply
-# model = BedrockEmbedding(model_name="cohere.embed-english-v3")
-coherePayload = ["This is a test document", "This is another test document"]
-
-embed1 = model.get_text_embedding("This is a test document")
-print(embed1)
-
-embeddings = model.get_text_embedding_batch(coherePayload)
-print(embeddings)
+embed_model = BedrockEmbedding(model_name="cohere.embed-english-v3")
 ```
 
 #### **2.3.2 LLM Generation**
 
-**Sync Generation** (using deprecated `Bedrock` class):
+**Sync Generation** (using `Bedrock` class for `chat()` endpoint):
 
 ```python
-from llama_index.core.llms import ChatMessage
 from llama_index.llms.bedrock import Bedrock
-
-llm = Bedrock(model="anthropic.claude-3-5-sonnet-20241022-v2:0", profile_name=profile_name)
-messages = [
-    ChatMessage(role="system", content="You are a helpful assistant"),
-    ChatMessage(role="user", content="Tell me a story"),
-]
-resp = llm.chat(messages)
-resp = llm.stream_chat(messages)  # sync streaming works
+llm = Bedrock(model="us.anthropic.claude-opus-4-5-20251101-v1:0", context_size=200000)
 ```
 
-**Async Streaming** (using `BedrockConverse` - recommended):
+**Async Streaming** (using `BedrockConverse` for `/chat/stream/` endpoint):
 
 ```python
 from llama_index.llms.bedrock_converse import BedrockConverse
+llm = BedrockConverse(model="us.anthropic.claude-opus-4-5-20251101-v1:0")
 
-llm = BedrockConverse(model="anthropic.claude-3-5-sonnet-20241022-v2:0", profile_name=profile_name)
-messages = [
-    ChatMessage(role="system", content="You are a helpful assistant"),
-    ChatMessage(role="user", content="Tell me a story"),
-]
-
-# Async streaming (for FastAPI /chat/stream/ endpoint)
-async for chunk in llm.astream_chat(messages):
+stream = await llm.astream_chat(messages)
+async for chunk in stream:
     print(chunk.delta, end="")
 ```
 
-**Note**: `llama_index.llms.bedrock.Bedrock` has `astream_chat()` but raises `NotImplementedError`. Use `BedrockConverse` for async streaming. See `documents/async.md` for concurrency details.
+**Model-specific caveats:**
+- `llama_index.llms.bedrock.Bedrock`: `astream_chat()` raises `NotImplementedError`. Use for sync only.
+- `llama_index.llms.bedrock_converse.BedrockConverse`: Full async support via `aioboto3`.
+- Cross-region inference profiles (`us.` prefix): Required for RMIT SCP. See `documents/bedrock_caveats.md`.
+- Non-foundation models (e.g., Opus 4.5): Require `context_size=200000` for old `Bedrock` class.
+- See `documents/async.md` for sync vs async concurrency patterns.
 
 #### **2.3.3 Citation-Grounded Generation**
+
 ```python
-query_engine = CitationQueryEngine.from_args(
-    index,
-    similarity_top_k=3,
-    # here we can control how granular citation sources are, the default is 512
+engine = CitationQueryEngine(
+    retriever=retriever,
+    llm=llm,
     citation_chunk_size=512,
 )
+response = engine.query("What is the site status?")
 ```
 
-**Note**: the QueryEngine must be constructed from the **session’s index**.
+For async streaming, `CitationQueryEngine.prepare_streaming_context()` replicates the retrieval + context packing workflow without the LLM call, then `BedrockConverse.astream_chat()` streams the generation.
 
-You may need to modify the source code at [the source code](https://github.com/run-llama/llama_index/blob/main/llama-index-core/llama_index/core/query_engine/citation_query_engine.py) has been copied to the local module: `utils/citation_query_engine.py` for easy import and customization
 ---
 
-# **3. Conversation Memory**
+## **3. Conversation Memory**
 
-The system must support **conversation memory** alongside retrieval:
+Uses Mem0 integration with **dual isolation architecture**:
 
-Use mem0 integration, [the source code](https://github.com/run-llama/llama_index/blob/main/llama-index-integrations/memory/llama-index-memory-mem0/llama_index/memory/mem0/base.py) has been copied to the local module: `utils/memory.py` for easy import and customization.
+### **Layer 1: Qdrant Collection** (Physical isolation)
+Each session gets its own collection: `mem0_memory_{session_id}`
+
+### **Layer 2: Mem0Context** (Logical filtering)
+`context = {"user_id": session_id}` passed to Mem0Memory for filtering within collection.
 
 ### Behavior:
-
-* memory store is session-keyed
-* memory is persisted via Qdrant
-* memory content must be injected into the LLM prompt for each new query, along with retrieved context:
+* Memory store is session-keyed
+* Memory is persisted via Qdrant (cloud or local)
+* Memory content is injected into the LLM prompt for each new query:
   ```
   prompt = memory_context + retrieved_chunks + user_query
   ```
 
+### Known Limitation:
+`CitationQueryEngine.query()` only accepts a query string, not a chat message list. Memory context is prepended to the query text, but full chat history structure is lost. See `documents/TODO.md` for options.
+
 ---
 
-# **4. FastAPI**
+## **4. FastAPI**
 
-Each user request contains:
+### Request format:
 ```json
 {
-  "message": "Given the site located at 322 New Street, Brighton 3186, is the site a priority site?",
+  "message": "Is the site a priority site?",
   "session_id": "a157",
-  "document_urls": [
-    "https://.../doc1.pdf",
-    "https://.../doc2.pdf"
-  ]
+  "document_urls": ["https://.../doc1.pdf"]
 }
 ```
 
-`session_id` is used to retrieve the memory.
+### Endpoints:
+- `POST /chat/` — Sync endpoint, OpenAI-compatible response format
+- `POST /chat/stream/` — Async streaming, OpenAI-compatible SSE format
+- `GET /health` — Health check
 
-Two endpoints:
-- `/chat/` - Sync endpoint (uses thread pool for concurrency)
-- `/chat/stream/` - Async streaming endpoint (uses `BedrockConverse.astream_chat()`)
-
-Response format:
+### Response format (`/chat/`):
 ```json
 {
-    "response": "...",
-    "session_id": "a157",
-    "citations": [
-        {"file": "xxx.pdf", "page": 12, "chunk_id": "c_14", "url": "xxx"},
-        ...
-    ],
+  "id": "chatcmpl-abc123",
+  "object": "chat.completion",
+  "choices": [{"message": {"role": "assistant", "content": "..."}, "finish_reason": "stop"}],
+  "citations": ["[doc.pdf (p.2)](https://...)"],
+  "sources": [{"file": "doc.pdf", "page": 2, "chunk_id": "c_1", "url": "https://..."}],
+  "timing": {"ingestion": 1.2, "retrieval": 0.3, "generation": 2.1, "memory": 0.1, "total": 3.7}
 }
 ```
 
-Streaming format (Server-Sent Events):
+### Streaming format (`/chat/stream/`):
 ```
-{"type": "token", "content": "The site"}
-{"type": "token", "content": " is classified"}
+data: {"id":"chatcmpl-xxx","choices":[{"delta":{"content":"The site"}}]}
+data: {"id":"chatcmpl-xxx","choices":[{"delta":{"content":" is classified"}}]}
 ...
-{"type": "done", "citations": [...], "sources": [...]}
+data: {"id":"chatcmpl-xxx","choices":[{"delta":{},"finish_reason":"stop"}],"citations":[...],"sources":[...]}
+data: [DONE]
 ```
 
 See `documents/async.md` for details on sync vs async concurrency patterns.
+
 ---
- 
+
+## **5. Deployment**
+
+EC2 instance in `ap-southeast-2` with:
+- Instance Profile (`rmit-workload-veris`) for Bedrock access
+- Elastic IP for stable endpoint
+- systemd service for auto-restart
+- Qdrant Cloud for vector storage
+
+Launch: `bash deploy/ec2_launch.sh`
+
+See `.kiro/specs/aws-deployment/tasks.md` for deployment details.
+
+
+---
+
+## **Q&A**
+
+### Q1: What does "shared vector store indexed by URL" mean vs "session-scoped ephemeral vector memory"?
+
+The original design stored `session_id` in each Qdrant chunk payload and filtered by `session_id` at retrieval time. Same PDF in 2 sessions = stored twice.
+
+The current implementation stores chunks indexed by `url` only (no `session_id` in Qdrant). A separate `session_index` maps `session_id → Set[url]`. Retrieval uses `MatchAny(key="url", any=session_urls)`. Same PDF in 2 sessions = stored once, shared.
+
+Retrieval is still session-scoped (each session only sees its own documents), but storage is shared and deduplicated.
+
+### Q2: What is `citation_chunk_size`?
+
+After retrieval, each retrieved chunk gets further split into smaller "citation chunks" by `CitationQueryEngine._create_citation_nodes()`. Each sub-chunk gets its own `Source: [filename (p.X)](url)` label.
+
+Smaller `citation_chunk_size` = more precise citations (LLM can point to specific sub-chunk). Larger = fewer sources in prompt, less token usage.
+
+With both ingestion `chunk_size` and `citation_chunk_size` at 512, retrieved chunks are typically not split further.
+
+### Q3: What is lost when memory context is prepended as text?
+
+`memory.get()` returns a full message list: `[SystemMessage(Mem0 facts), USER(turn1), ASSISTANT(turn1), USER(turn2)]`. But `service.py` only extracts the system message (Mem0 extracted facts) and discards the chat history turns:
+
+```python
+messages_with_context = memory.get(input=message)
+memory_context = messages_with_context[0].content  # Only Mem0 facts
+query_text = f"Context:\n{memory_context}\n\nQuestion: {message}"
+engine.query(query_text)  # Chat history discarded here
+```
+
+The chat history IS available from `memory.get()`, but `CitationQueryEngine.query()` only accepts a string, so it can't be passed through. This means:
+- **Turn-by-turn conversation flow** — The LLM doesn't see the back-and-forth. "Can you elaborate?" has no reference to what it previously said. It can't elaborate on its own prior answer because it never sees it.
+- **Role distinction** — Everything becomes one flat string. The LLM can't distinguish between what the user said vs what it previously answered. This matters for instructions like "repeat what you said earlier."
+- **Multi-turn coreference** — "What about the second document?" — the LLM doesn't know which documents were discussed in prior turns because it only sees Mem0's extracted facts, not the actual conversation.
+
+Mem0's extracted facts (e.g., "User's name is Alice") survive. Single-turn document Q&A works fine. The limitation is in the `service.py` ↔ `CitationQueryEngine` integration, not in `memory.get()` itself.
