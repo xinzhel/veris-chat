@@ -57,7 +57,7 @@ Health check endpoint.
 ## Test Commands
 ```bash
 # Set API host (use localhost for local dev, or EC2 IP for deployed)
-export API_HOST=localhost:8000
+export API_HOST=54.66.111.21:8000
 # export API_HOST=54.66.111.21:8000  # EC2 deployment
 
 # Health check
@@ -73,6 +73,16 @@ curl -X POST http://${API_HOST}/chat/ \
   }'
 
 # Streaming chat with document ingestion
+
+curl -X POST http://${API_HOST}/chat/stream/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "seession2",
+    "message": "What is the purpose of this document?",
+    "document_urls": ["https://drapubcdnprd.azureedge.net/publicregister/attachments/permissions/e991aac7-4fb2-eb11-8236-00224814b351/OL000071228 - Statutory Document.pdf"]
+  }' --no-buffer
+
+
 curl -X POST http://${API_HOST}/chat/stream/ \
   -H "Content-Type: application/json" \
   -d '{

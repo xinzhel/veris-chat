@@ -674,6 +674,7 @@ async def async_chat(
 class OpenAIStreamFormatter:
     """
     Convert async_chat() output to OpenAI-compatible streaming format.
+    https://platform.openai.com/docs/api-reference/chat/streaming
     
     Usage in FastAPI:
         formatter = OpenAIStreamFormatter()
