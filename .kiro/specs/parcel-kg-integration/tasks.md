@@ -22,10 +22,12 @@ T7 = Final checkpoint
 
 ## Tasks
 
-- [ ] Task 1: Connect to existing Neo4j on EC2 and verify
-  - Neo4j is already deployed by front-end team on EC2 instance `i-0b7573f263471811d` (ap-southeast-2, private IP `10.0.2.113`, project: `vic_unearthed`, ASG: `map_talk-asg`)
-  - [ ] Determine access method: instance has no public IP — need SSH tunnel via bastion host or VPC peering. Check with front-end developer how they connect.
-  - [ ] Verify Neo4j connectivity by running a sample Cypher query (e.g., `MATCH (p:Parcel) RETURN count(p)`)
+- [x] Task 1: Connect to existing Neo4j on EC2 and verify
+  - Neo4j deployed on EC2 instance `i-018c87e156b4cbd8a` (t3.medium, ap-southeast-2, EIP `54.253.127.203`)
+  - [x] Neo4j Docker built and running with n10s plugin
+  - [x] RDF data loaded: 8,717,108 nodes, 11,949,449 relationships, 3,690,107 parcels
+  - [x] Data stored in S3: `s3://veris-kg-data-xinzhe/output/`
+  - [x] SSH tunnel access: `ssh -fN -L 7687:localhost:7687 -L 7474:localhost:7474 -i ~/.ssh/race_lits_server.pem ec2-user@54.253.127.203`
   - [ ] Add `neo4j` config block to `config.yaml` with `uri`, `user`, `password` fields
   - [ ] Add `neo4j` Python driver to `environment.yaml` dependencies
   - _Requirements: 4.1, 4.2_
