@@ -5,7 +5,7 @@
 # ============================================================================
 # EC2 DEPLOYMENT CONFIGURATION
 # ============================================================================
-# - Instance type: t3.small (2 vCPU, 2 GB RAM — Neo4j is read-only after load)
+# - Instance type: t3.medium (2 vCPU, 4 GB RAM — Neo4j needs ~2GB heap for 5.9GB RDF data)
 # - AMI: ami-00a51cc7a8cd53e3f (Amazon Linux 2023, ap-southeast-2)
 # - Key pair: race_lits_server
 # - Region: ap-southeast-2 (Sydney)
@@ -54,6 +54,12 @@ curl -SL https://github.com/docker/compose/releases/latest/download/docker-compo
   -o /usr/local/lib/docker/cli-plugins/docker-compose
 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
+# Install docker-buildx plugin (required for compose build on AL2023)
+BUILDX_VERSION=$(curl -s https://api.github.com/repos/docker/buildx/releases/latest | grep tag_name | cut -d '"' -f 4)
+curl -SL "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-amd64" \
+  -o /usr/local/lib/docker/cli-plugins/docker-buildx
+chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
+
 echo "=== Cloning repository ==="
 cd /home/ec2-user
 git clone --depth 1 --branch ${BRANCH} ${REPO_URL} vic_unearthed_kg
@@ -64,7 +70,7 @@ chown -R ec2-user:ec2-user ${APP_DIR}
 # ============================================================================
 echo "=== Downloading RDF data from S3 ==="
 mkdir -p ${APP_DIR}/output
-aws s3 cp s3://veris-kg-data/output/ ${APP_DIR}/output/ --recursive
+aws s3 cp s3://veris-kg-data-xinzhe/output/ ${APP_DIR}/output/ --recursive
 echo "=== RDF data downloaded ==="
 
 # ============================================================================

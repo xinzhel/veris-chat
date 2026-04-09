@@ -15,7 +15,7 @@ set -e
 
 REGION="ap-southeast-2"
 AMI_ID="ami-00a51cc7a8cd53e3f"
-INSTANCE_TYPE="t3.small"
+INSTANCE_TYPE="t3.medium"
 KEY_NAME="race_lits_server"
 SECURITY_GROUP="sg-0fed3f02e16c4f50e"
 INSTANCE_PROFILE="rmit-workload-veris"
@@ -77,7 +77,7 @@ echo "Generating user-data with secrets..."
 envsubst '${GIT_TOKEN}' < deploy_kg/user_data.sh > /tmp/user_data_kg.sh
 
 # Launch EC2 instance
-echo "Launching EC2 instance (t3.small)..."
+echo "Launching EC2 instance ($INSTANCE_TYPE)..."
 INSTANCE_ID=$(aws ec2 run-instances \
   --region $REGION \
   --image-id $AMI_ID \
