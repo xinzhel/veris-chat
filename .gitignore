@@ -1,3 +1,5 @@
+neptune_deployment/vic_unearthed_kg/
+
 # Environment variables
 .env
 # .kiro/
@@ -59,3 +61,4 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.jsonneptune_deployment/
+deploy_kg/data/

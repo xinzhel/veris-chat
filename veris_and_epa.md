@@ -52,3 +52,34 @@ However:
 
 An Environmental Audit is required only when mandated by planning or environmental regulation.
 Veris can support the process, but the formal legal audit outcome must be issued by an EPA-appointed Environmental Auditor.
+
+
+---
+
+## Q&A
+
+### What does PFI mean?
+
+PFI = Parcel Feature Identifier. It's the unique ID from Vicmap (Victoria's spatial data infrastructure) used to identify each land parcel. In the KG, parcels are looked up by PFI: `WHERE '433375739' IN p.hasPFI`. In our system, `parcel_id` = PFI.
+
+PFI comes from Vicmap, not from Victoria Unearthed directly. The KG maps Vicmap parcels to Victoria Unearthed assessment data via spatial overlap.
+
+### What is Victoria Unearthed?
+
+Victoria Unearthed is EPA Victoria's public portal that maps contaminated land data across Victoria — environmental audits, EPA licences, priority sites, landfill registers, groundwater zones, etc.
+
+### How is this project related to Victoria Unearthed?
+
+- **Victoria Unearthed** = the public data source (EPA portal)
+- **vic_unearthed_kg** = a knowledge graph built from Victoria Unearthed data, linking parcels to 7 assessment types (audit, licence, prsa, psr, vlr, overlay, business listing)
+- **veris-chat** = a RAG chatbot that uses both the KG (parcel context) and PDF reports (from Victoria Unearthed assessment links) to answer questions
+
+The project is essentially: build a conversational AI on top of Victoria Unearthed data.
+
+### What is the relationship between Veris and Victoria Unearthed?
+
+They are separate entities:
+- **Victoria Unearthed** = EPA Victoria's public data portal
+- **Veris** = a private environmental consulting firm that does contamination assessments
+
+Veris is a potential user/consumer of Victoria Unearthed data — consultants would look up parcels to check audit history, EPA licences, priority site status, etc. The repo name `veris-chat` suggests Veris is the intended end-user or client for this tool.

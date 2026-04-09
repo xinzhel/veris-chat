@@ -51,25 +51,25 @@ sequenceDiagram
     participant MEM as Mem0 Memory
 
     FE->>API: POST /chat/ {session_id: "PFI::temp", message: "..."}
-    API->>SVC: chat(session_id, message)
-    SVC->>SVC: parse_session_id("PFI::temp") → (parcel_id, temp_id)
-    SVC->>KG: get_document_urls(parcel_id)
-    KG-->>SVC: ["https://...pdf", ...]
+    API->>API: parse_session_id → parcel_id
+    API->>KG: get_document_urls(parcel_id)
+    KG-->>API: ["https://...pdf", ...]
+    API->>KG: get_parcel_context(parcel_id)
+    KG-->>API: {audits: [...], licences: [...], ...}
+    Note right of API: Resolve everything at app/ level
+    API->>SVC: chat(session_id, message, document_urls, system_message, parcel_context)
     SVC->>ING: store(url, session_id) for each URL
     ING-->>SVC: (ingested)
-    SVC->>KG: get_parcel_context(parcel_id)
-    KG-->>SVC: {audits: [...], licences: [...], ...}
-    Note right of SVC: Build system message with parcel context
     SVC->>MEM: get memory context
     MEM-->>SVC: memory facts
     SVC->>QD: retrieve with session URL filter
     QD-->>SVC: relevant chunks
-    Note right of SVC: CitationQueryEngine: parcel context + memory + chunks + query → LLM
+    Note right of SVC: system_message + parcel_context + memory + chunks + query → LLM
     SVC-->>API: {answer, citations, sources, ...}
     API-->>FE: OpenAI-compatible response
 ```
 
-Frontend sends only `session_id` + `message`. Backend resolves document URLs and parcel context from the KG.
+Frontend sends only `session_id` + `message`. The app/ layer (chat_api.py) resolves document URLs and parcel context from the KG, then passes them to the generic service layer. `service.py` stays application-agnostic.
 
 
 ## Main Workflow
@@ -175,7 +175,7 @@ def format_parcel_context(parcel_id: str, kg_context: dict) -> str:
 
 ### 3. Modified `chat()` / `async_chat()` in `service.py`
 
-Changes to existing functions:
+Changes to existing functions — add `system_message` and `parcel_context` parameters:
 
 ```python
 # Before (current):
@@ -184,24 +184,49 @@ def chat(session_id, message, document_urls=None, ...):
         _ingest_documents(document_urls, session_id, config)
 
 # After (new):
-def chat(session_id, message, document_urls=None, ...):
-    parcel_id, temp_id = parse_session_id(session_id)
+def chat(session_id, message, document_urls=None,
+         system_message=None, parcel_context=None, ...):
+    # document_urls, system_message, parcel_context all resolved by app/ layer
+    if document_urls:
+        _ingest_documents(document_urls, session_id, config)
     
-    # Resolve URLs from KG (replaces frontend-supplied document_urls)
-    kg_client = _get_kg_client(config)
-    kg_urls = kg_client.get_document_urls(parcel_id)
-    if kg_urls:
-        _ingest_documents(kg_urls, session_id, config)
-    
-    # Build system message with parcel context
-    kg_context = kg_client.get_parcel_context(parcel_id)
-    parcel_system_msg = format_parcel_context(parcel_id, kg_context)
-    # Inject into query engine as system prompt prefix
+    # Combine context layers into query:
+    # system_message (Layer 1: app identity) + parcel_context (Layer 2: KG data)
+    # + memory_context (Layer 3: Mem0 facts) + retrieved_chunks + user query
 ```
 
-The `document_urls` parameter is kept for backward compatibility but ignored when session ID contains `::`.
+`service.py` stays application-agnostic — it doesn't know about parcels, KG, or Neo4j. It just receives strings.
 
-### 4. New API Endpoint: Session Cleanup
+### 4. Modified `chat_api.py` — KG Resolution at App Level
+
+```python
+# In app/chat_api.py
+
+APP_SYSTEM_MESSAGE = """You are an environmental assessment assistant for Victorian land parcels.
+You answer questions grounded in assessment reports and knowledge graph data.
+Always cite sources using the provided markdown link format."""
+
+@app.post("/chat/")
+async def chat_endpoint(request: ChatRequest):
+    parcel_id, temp_id = parse_session_id(request.session_id)
+    
+    # Resolve from KG (app-level concern)
+    kg_client = get_kg_client()
+    document_urls = kg_client.get_document_urls(parcel_id)
+    kg_context = kg_client.get_parcel_context(parcel_id)
+    parcel_context = format_parcel_context(parcel_id, kg_context)
+    
+    result = chat(
+        session_id=request.session_id,
+        message=request.message,
+        document_urls=document_urls,
+        system_message=APP_SYSTEM_MESSAGE,
+        parcel_context=parcel_context,
+    )
+    return format_chat_response_openai(result)
+```
+
+### 5. New API Endpoint: Session Cleanup
 
 ```python
 # In app/chat_api.py
@@ -211,7 +236,7 @@ async def delete_session(session_id: str):
     """Clean up a parcel session: remove session index, memory, cached KG data."""
 ```
 
-### 5. Modified `ChatRequest` Schema
+### 6. Modified `ChatRequest` Schema
 
 ```python
 class ChatRequest(BaseModel):
@@ -245,6 +270,8 @@ neo4j:
 ```
 
 ### KG Context Structure (returned by `get_parcel_context`)
+
+> **Note**: This is a proposed design. The 7 keys and field names are inferred from the Cypher queries in `SAMPLE_CYPHER_QUERIES.md` (e.g., `assessmentDate`, `hasPermissionType`, `hasBusinessType`, `isHighPotentialContamination`). The exact dict structure will be finalized after deploying Neo4j and testing actual query results.
 
 ```python
 {
@@ -299,12 +326,12 @@ curl -X DELETE http://localhost:8000/chat/sessions/433375739::abc123
 ### System Message Structure (two layers)
 
 ```
-Layer 1 (Application Context):
-  You are an environmental assessment assistant for Victorian parcels.
+Layer 1 — system_message (Application Context, static, defined in app/):
+  You are an environmental assessment assistant for Victorian land parcels.
   You answer questions grounded in assessment reports and knowledge graph data.
-  Always cite sources using [filename (p.X)](url) format.
+  Always cite sources using the provided markdown link format.
 
-Layer 2 (Parcel Context — from KG):
+Layer 2 — parcel_context (Parcel Context, dynamic, from KG via app/):
   ## Parcel Context (PFI: 433375739)
   ### Environmental Audits
   - Audit dated 2019-03-15: environmental audit completed
@@ -321,6 +348,12 @@ Layer 2 (Parcel Context — from KG):
   - Environmental Significance Overlay (ESO)
   ### PRSA
   - No preliminary risk screening assessments
+
+Layer 3 — memory_context (Mem0 facts, dynamic, from service.py):
+  (Automatically injected by service.py from Mem0 memory)
+
+Layer 4 — retrieved_chunks (from Qdrant, dynamic, from service.py):
+  (Automatically injected by CitationQueryEngine from session documents)
 ```
 
 
@@ -348,7 +381,36 @@ Layer 2 (Parcel Context — from KG):
 
 ### Property 4: Parcel context covers all 7 connection types
 
-*For any* parcel ID, `get_parcel_context(parcel_id)` should return a dict containing exactly the 7 keys: `audits`, `licences`, `prsa`, `psr`, `vlr`, `overlays`, `business_listings`. Each value should be a list (possibly empty if the parcel has no data for that type). The formatted system message from `format_parcel_context()` should contain a section header for each of the 7 types.
+*For any* parcel ID, `get_parcel_context(parcel_id)` should return a dict containing exactly the 7 keys: `audits`, `licences`, `prsa`, `psr`, `vlr`, `overlays`, `business_listings`. Each value should be a list (possibly empty if the parcel has no data for that type — most parcels will NOT have all 7 types). The formatted system message from `format_parcel_context()` should contain a section header for each of the 7 types, explicitly noting "No data found" for empty types so the LLM knows the absence is confirmed rather than missing.
 
 **Validates: Requirements 3.1**
 
+
+## Q&A
+
+### Why use `@app.delete()` for session cleanup?
+
+HTTP defines standard methods (verbs), and FastAPI maps each to a decorator:
+
+| HTTP Method | FastAPI Decorator | Typical Use |
+|-------------|------------------|-------------|
+| GET | `@app.get()` | Read/retrieve |
+| POST | `@app.post()` | Create/submit |
+| PUT | `@app.put()` | Full update/replace |
+| PATCH | `@app.patch()` | Partial update |
+| DELETE | `@app.delete()` | Delete a resource |
+
+`@app.delete("/chat/sessions/{session_id}")` means: when the client sends `DELETE /chat/sessions/xxx`, run this function. It's RESTful convention — using DELETE for resource removal rather than `POST /chat/sessions/delete`.
+
+```bash
+curl -X DELETE http://localhost:8000/chat/sessions/433375739::abc123
+```
+
+### Why show "No data found" for empty connection types instead of skipping them?
+
+The distinction is between **confirmed absence** vs **missing information**:
+
+- **Confirmed absence**: System queried the KG and found no EPA licences for this parcel. The system message says "No EPA licences found." → LLM can confidently say "This parcel has no EPA licences."
+- **Missing information**: System message doesn't mention EPA licences at all. → LLM doesn't know if we didn't check or if there are none. It may say "I don't have information about that" or hallucinate.
+
+`format_parcel_context()` must explicitly include all 7 types, noting "No data found" for empty ones, so the LLM treats absence as a confirmed fact rather than a gap in its context.
