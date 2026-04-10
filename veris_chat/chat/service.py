@@ -328,12 +328,12 @@ def _get_models(config: Dict[str, Any]) -> tuple:
         models_cfg = config.get("models", {})
         
         # Use Bedrock class for sync operations
-        # Note: For Opus 4.5, need to specify context_size as it's not in foundation model list
+        # Note: For Opus 4.5/4.6, need to specify context_size as it's not in foundation model list
         generation_model = models_cfg.get("generation_model", "anthropic.claude-3-5-sonnet-20240620-v1:0")
         
         llm = Bedrock(
             model=generation_model,
-            context_size=200000,  # Required for non-foundation models like Opus 4.5
+            context_size=200000,  # Required for non-foundation models (Opus 4.5/4.6)
             **bedrock_kwargs,
         )
         
