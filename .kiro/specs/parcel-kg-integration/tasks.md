@@ -28,8 +28,8 @@ T7 = Final checkpoint
   - [x] RDF data loaded: 8,717,108 nodes, 11,949,449 relationships, 3,690,107 parcels
   - [x] Data stored in S3: `s3://veris-kg-data-xinzhe/output/`
   - [x] SSH tunnel access: `ssh -fN -L 7687:localhost:7687 -L 7474:localhost:7474 -i ~/.ssh/race_lits_server.pem ec2-user@54.253.127.203`
-  - [ ] Add `neo4j` config block to `config.yaml` with `uri`, `user`, `password` fields
-  - [ ] Add `neo4j` Python driver to `environment.yaml` dependencies
+  - [x] Add `neo4j` config block to `config.yaml` with `uri`, `user`, `password` fields
+  - [x] Add `neo4j` Python driver to `environment.yaml` dependencies
   - _Requirements: 4.1, 4.2_
 
 - [ ] Task 2: Implement KGClient module (`veris_chat/kg/client.py`)

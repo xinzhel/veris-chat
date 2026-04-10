@@ -56,3 +56,11 @@ pdf_parsing:
 
 
 
+
+# Neo4j Knowledge Graph
+# Local dev: SSH tunnel to EC2 (bolt://localhost:7687)
+# EC2: direct connection (bolt://localhost:7687 if same machine, or bolt://<neo4j-ip>:7687)
+neo4j:
+  uri: "bolt://localhost:7687"
+  user: "neo4j"
+  password: "neo4jpassword"

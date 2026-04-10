@@ -134,6 +134,9 @@ AWS_REGION=us-east-1
 EOF
 chown ec2-user:ec2-user ${APP_DIR}/.env
 
+echo "=== Configuring Neo4j connection for EC2 ==="
+sed -i 's|bolt://localhost:7687|bolt://54.253.127.203:7687|' ${APP_DIR}/config.yaml
+
 echo "=== Installing Python dependencies ==="
 cd ${APP_DIR}
 sudo -u ec2-user pip3.11 install --user --upgrade pip
