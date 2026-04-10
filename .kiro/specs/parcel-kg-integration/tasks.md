@@ -49,11 +49,11 @@ T7 = Final checkpoint
   - [x] Implement `parse_session_id(session_id) -> tuple[str, str]` — splits `parcel_id::temp_id`, raises `ValueError` if `::` separator missing
   - _Requirements: 3.1, 1.1_
 
-- [ ] Task 4: Modify `service.py` to accept `system_message` and `parcel_context` parameters
-  - [ ] Add `system_message: Optional[str] = None` and `parcel_context: Optional[str] = None` parameters to `chat()` function signature
-  - [ ] Add same parameters to `async_chat()` function signature
-  - [ ] Integrate `system_message` + `parcel_context` into the prompt construction — prepend as context layers before memory context and retrieved chunks (Layer 1: system_message, Layer 2: parcel_context, Layer 3: memory, Layer 4: chunks)
-  - [ ] Ensure backward compatibility: when `system_message` and `parcel_context` are `None`, behavior is identical to current implementation
+- [x] Task 4: Modify `service.py` to accept `system_message` and `parcel_context` parameters
+  - [x] Add `system_message: Optional[str] = None` and `parcel_context: Optional[str] = None` parameters to `chat()` function signature
+  - [x] Add same parameters to `async_chat()` function signature
+  - [x] Integrate `system_message` + `parcel_context` into the prompt construction — prepend as context layers before memory context and retrieved chunks (Layer 1: system_message, Layer 2: parcel_context, Layer 3: memory, Layer 4: chunks)
+  - [x] Ensure backward compatibility: when `system_message` and `parcel_context` are `None`, behavior is identical to current implementation
   - _Requirements: 3.1, 2.2_
 
 - [ ] Task 5: Modify `chat_api.py` — KG resolution at app level

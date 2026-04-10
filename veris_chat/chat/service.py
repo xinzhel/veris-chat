@@ -207,20 +207,42 @@ def _get_memory_context(
         return None, None, elapsed
 
 
-def _augment_query_with_memory(message: str, memory_context: Optional[str]) -> str:
+def _augment_query_with_memory(
+    message: str,
+    memory_context: Optional[str],
+    system_message: Optional[str] = None,
+    parcel_context: Optional[str] = None,
+) -> str:
     """
-    Augment query with memory context if available.
+    Augment query with context layers.
+    
+    Context layers (prepended in order):
+    - Layer 1: system_message (app identity, static)
+    - Layer 2: parcel_context (KG data, dynamic per parcel)
+    - Layer 3: memory_context (Mem0 facts, dynamic per session)
+    - Layer 4: retrieved chunks (handled by CitationQueryEngine, not here)
     
     Args:
         message: Original user message.
         memory_context: Context from previous conversations (or None).
+        system_message: Application-level system prompt (or None).
+        parcel_context: Parcel-specific context from KG (or None).
         
     Returns:
         Augmented query string.
     """
+    parts = []
+    if system_message:
+        parts.append(system_message)
+    if parcel_context:
+        parts.append(parcel_context)
     if memory_context:
-        query = f"Context from previous conversations:\n{memory_context}\n\nCurrent question: {message}"
-        logger.info(f"[SERVICE] Augmented query with memory context")
+        parts.append(f"Context from previous conversations:\n{memory_context}")
+    
+    if parts:
+        context_block = "\n\n".join(parts)
+        query = f"{context_block}\n\nCurrent question: {message}"
+        logger.info(f"[SERVICE] Augmented query with {len(parts)} context layer(s)")
         return query
     return message
 
@@ -352,6 +374,8 @@ def chat(
     top_k: int = 5,
     use_memory: bool = True,
     citation_style: str = "markdown_link",
+    system_message: Optional[str] = None,
+    parcel_context: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Orchestrate the full chat flow: ingestion, retrieval, and generation.
@@ -363,6 +387,8 @@ def chat(
         top_k: Number of top chunks to retrieve for context.
         use_memory: Whether to use conversation memory (Mem0).
         citation_style: Citation format - "markdown_link", "inline", "bracket", "footnote".
+        system_message: Optional application-level system prompt (Layer 1).
+        parcel_context: Optional parcel-specific context from KG (Layer 2).
         
     Returns:
         Dict containing:
@@ -416,7 +442,7 @@ def chat(
             session_id, message, config
         )
     
-    query_text = _augment_query_with_memory(message, memory_context)
+    query_text = _augment_query_with_memory(message, memory_context, system_message, parcel_context)
     
     # Step 4: Execute query
     logger.info(f"[SERVICE] Executing query: {message[:50]}...")
@@ -529,6 +555,8 @@ async def async_chat(
     top_k: int = 5,
     use_memory: bool = True,
     citation_style: str = "markdown_link",
+    system_message: Optional[str] = None,
+    parcel_context: Optional[str] = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Async streaming chat with citation-grounded generation.
@@ -596,7 +624,7 @@ async def async_chat(
             session_id, message, config
         )
     
-    query_text = _augment_query_with_memory(message, memory_context)
+    query_text = _augment_query_with_memory(message, memory_context, system_message, parcel_context)
     
     # Step 4: Prepare Streaming Context (replicate CitationQueryEngine workflow)
     logger.info(f"[SERVICE] Preparing streaming context...")
