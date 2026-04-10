@@ -32,13 +32,14 @@ T7 = Final checkpoint
   - [x] Add `neo4j` Python driver to `environment.yaml` dependencies
   - _Requirements: 4.1, 4.2_
 
-- [ ] Task 2: Implement KGClient module (`veris_chat/kg/client.py`)
-  - [ ] Create `veris_chat/kg/__init__.py` and `veris_chat/kg/client.py`
-  - [ ] Implement `KGClient.__init__(uri, user, password)` — wraps `neo4j.GraphDatabase.driver`
-  - [ ] Implement `get_document_urls(parcel_id) -> list[str]` — Cypher query: `MATCH (p:Parcel)-[:hasOnsiteAssessment|hasOffsiteAssessment]->(a:Resource)-[:hasAssessmentReport]->(r:AssessmentReport) WHERE parcel_id IN p.hasPFI RETURN r.hasLink[0] AS pdf_url`
-  - [ ] Implement `get_parcel_context(parcel_id) -> dict` — returns dict with 7 keys: `audits`, `licences`, `prsa`, `psr`, `vlr`, `overlays`, `business_listings`. Each value is a list of dicts with assessment-specific fields from the KG
-  - [ ] Implement `close()` to shut down the Neo4j driver
-  - [ ] Add `get_kg_client()` factory function that reads `neo4j` config from `config.yaml` and caches the client instance
+- [x] Task 2: Implement KGClient module (`veris_chat/kg/client.py`)
+  - [x] Create `veris_chat/kg/__init__.py` and `veris_chat/kg/client.py`
+  - [x] Implement `KGClient.__init__(uri, user, password)` — wraps `neo4j.GraphDatabase.driver`
+  - [x] Implement `get_document_urls(parcel_id) -> list[str]` — Cypher query: `MATCH (p:Parcel)-[:hasOnsiteAssessment|hasOffsiteAssessment]->(a:Resource)-[:hasAssessmentReport]->(r:AssessmentReport) WHERE parcel_id IN p.hasPFI RETURN r.hasLink[0] AS pdf_url`
+  - [x] Implement `get_parcel_context(parcel_id) -> dict` — returns dict with 7 keys: `audits`, `licences`, `prsa`, `psr`, `vlr`, `overlays`, `business_listings`. Each value is a list of dicts with assessment-specific fields from the KG
+  - [x] Implement `close()` to shut down the Neo4j driver
+  - [x] Add `get_kg_client()` factory function that reads `neo4j` config from `config.yaml` and caches the client instance
+  - Note: Query performance ~54s cold / ~35s warm on t3.medium. See `.kiro/specs/neo4j-optimization/` for optimization plan.
   - _Requirements: 2.1, 2.3, 3.1_
 
 - [ ] Task 3: Implement `format_parcel_context()` (`veris_chat/kg/context.py`)
