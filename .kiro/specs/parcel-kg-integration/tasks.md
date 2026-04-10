@@ -42,11 +42,11 @@ T7 = Final checkpoint
   - Note: Query performance ~54s cold / ~35s warm on t3.medium. See `.kiro/specs/neo4j-optimization/` for optimization plan.
   - _Requirements: 2.1, 2.3, 3.1_
 
-- [ ] Task 3: Implement `format_parcel_context()` (`veris_chat/kg/context.py`)
-  - [ ] Create `veris_chat/kg/context.py`
-  - [ ] Implement `format_parcel_context(parcel_id, kg_context) -> str` — converts the dict from `get_parcel_context()` into a natural-language system message block with section headers for all 7 connection types
-  - [ ] For empty connection types, output "No data found" (confirmed absence, not missing info — see design Q&A)
-  - [ ] Implement `parse_session_id(session_id) -> tuple[str, str]` — splits `parcel_id::temp_id`, raises `ValueError` if `::` separator missing
+- [x] Task 3: Implement `format_parcel_context()` (`veris_chat/kg/context.py`)
+  - [x] Create `veris_chat/kg/context.py`
+  - [x] Implement `format_parcel_context(parcel_id, kg_context) -> str` — converts the dict from `get_parcel_context()` into a natural-language system message block with section headers for all 7 connection types
+  - [x] For empty connection types, output "No data found" (confirmed absence, not missing info — see design Q&A)
+  - [x] Implement `parse_session_id(session_id) -> tuple[str, str]` — splits `parcel_id::temp_id`, raises `ValueError` if `::` separator missing
   - _Requirements: 3.1, 1.1_
 
 - [ ] Task 4: Modify `service.py` to accept `system_message` and `parcel_context` parameters
