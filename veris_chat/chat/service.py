@@ -624,7 +624,7 @@ async def async_chat(
             session_id, message, config
         )
     
-    query_text = _augment_query_with_memory(message, memory_context, system_message, parcel_context)
+    query_text = _augment_query_with_memory(message, memory_context)
     
     # Step 4: Prepare Streaming Context (replicate CitationQueryEngine workflow)
     logger.info(f"[SERVICE] Preparing streaming context...")
@@ -649,7 +649,18 @@ async def async_chat(
     logger.info(f"[SERVICE] LLM region_name: {getattr(streaming_llm, 'region_name', 'NOT SET')}")
     t_generation_start = time.perf_counter()
     
-    messages = [ChatMessage(role=MessageRole.USER, content=prompt)]
+    # Build message list with proper system message placement
+    # async_chat() controls the LLM call directly, so we can use Bedrock's
+    # system message position for better instruction adherence
+    messages = []
+    sys_parts = []
+    if system_message:
+        sys_parts.append(system_message)
+    if parcel_context:
+        sys_parts.append(parcel_context)
+    if sys_parts:
+        messages.append(ChatMessage(role=MessageRole.SYSTEM, content="\n\n".join(sys_parts)))
+    messages.append(ChatMessage(role=MessageRole.USER, content=prompt))
     full_response = ""
     token_count = 0
     

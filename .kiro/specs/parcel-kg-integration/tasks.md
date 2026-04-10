@@ -55,8 +55,9 @@ T7 = Final checkpoint
   - [x] Integrate `system_message` + `parcel_context` into the prompt construction — prepend as context layers before memory context and retrieved chunks (Layer 1: system_message, Layer 2: parcel_context, Layer 3: memory, Layer 4: chunks)
   - [x] Ensure backward compatibility: when `system_message` and `parcel_context` are `None`, behavior is identical to current implementation
   - Note on system message placement:
-    - `chat()`: system_message is prepended to query text (CitationQueryEngine only accepts a string, can't pass system message separately)
-    - `async_chat()`: system_message CAN be placed in Bedrock API's system message position, because `async_chat()` uses `engine.prepare_streaming_context()` for retrieval only, then calls `streaming_llm.astream_chat(messages)` directly — giving full control over the message list. This is a future improvement.
+    - `chat()`: system_message prepended to query text (CitationQueryEngine only accepts a string)
+    - `async_chat()`: system_message placed in Bedrock API system message position (better LLM adherence)
+  - [x] In `async_chat()`, use `ChatMessage(role=SYSTEM)` for system_message + parcel_context instead of prepending to query text
   - _Requirements: 3.1, 2.2_
 
 - [ ] Task 5: Modify `chat_api.py` — KG resolution at app level
