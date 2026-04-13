@@ -1,6 +1,6 @@
 # New Session
 
-Exported: 4/9/2026, 8:22:52 PM
+Exported: 4/10/2026, 8:48:38 PM
 
 ## Steering Documents
 
@@ -3845,5 +3845,1078 @@ ssh -i ~/.ssh/race_lits_server.pem ec2-user@54.253.127.203
 ```
 
 然后粘贴那段 `sudo tee ... systemctl enable` 命令。跑完后 stop EC2 就可以下班了。
+
+---
+
+**User:**
+
+今天是第二天了，帮我重新launch 这个ec2
+
+---
+
+**Assistant:**
+
+先看看昨天的 instance 状态：
+
+Instance 是 stopped 状态，数据还在。Start 就行，不需要重新 launch：
+
+Starting up. 等 ~30 秒后，你昨天有没有跑那个 systemd enable 命令？如果没有，Neo4j 不会自动启动，需要 SSH 进去手动启动：
+
+```bash
+# 等 instance running 后
+ssh -i ~/.ssh/race_lits_server.pem ec2-user@54.253.127.203
+
+# 检查 Neo4j 是否自动启动了
+docker ps
+
+# 如果没有，手动启动
+cd ~/vic_unearthed_kg
+docker compose -f neo4j_docker/docker-compose.yml up -d
+```
+
+然后开 SSH tunnel：
+```bash
+ssh -fN -L 7687:localhost:7687 -L 7474:localhost:7474 -i ~/.ssh/race_lits_server.pem ec2-user@54.253.127.203
+```
+
+---
+
+**User:**
+
+[ec2-user@ip-172-31-13-31 ~]$ docker ps
+CONTAINER ID   IMAGE                COMMAND                  CREATED        STATUS              PORTS                                                                                            NAMES
+f879413db382   neo4j_docker-neo4j   "tini -g -- /startup…"   22 hours ago   Up About a minute   0.0.0.0:7474->7474/tcp, :::7474->7474/tcp, 7473/tcp, 0.0.0.0:7687->7687/tcp, :::7687->7687/tcp   neo4j_docker-neo4j-1
+
+---
+
+**Assistant:**
+
+Neo4j 自动启动了（说明昨天你跑了 systemd enable）。现在开 SSH tunnel 从本地连接：
+
+```bash
+ssh -fN -L 7687:localhost:7687 -L 7474:localhost:7474 -i ~/.ssh/race_lits_server.pem ec2-user@54.253.127.203
+```
+
+然后可以开始 Task 2 (KGClient) 了。
+
+---
+
+**User:**
+
+generate 一个命令给我测试下
+
+---
+
+**Assistant:**
+
+开完 tunnel 后，在本地跑：
+
+```bash
+pip install neo4j
+python -c "
+from neo4j import GraphDatabase
+d = GraphDatabase.driver('bolt://localhost:7687', auth=('neo4j', 'neo4jpassword'))
+with d.session() as s:
+    r = s.run('MATCH (p:Parcel) RETURN count(p) AS cnt')
+    print(f'Parcels: {r.single()[\"cnt\"]}')
+d.close()
+"
+```
+
+应该输出 `Parcels: 3690107`。
+
+---
+
+**User:**
+
+给我用uv install一个environment，see environment.yaml for the existing  need
+
+---
+
+**Assistant:**
+
+
+
+对，先创建 `pyproject.toml`：
+
+Now install:
+
+```bash
+uv pip install -e .
+```
+
+Or if you just want to install deps without editable mode:
+
+```bash
+uv pip install -r pyproject.toml
+```
+
+---
+
+**User:**
+
+uv pip install -r pyproject.toml
+install 好了
+
+---
+
+**Assistant:**
+
+现在测试 Neo4j 连接（确保 SSH tunnel 已开）：
+
+```bash
+python -c "
+from neo4j import GraphDatabase
+d = GraphDatabase.driver('bolt://localhost:7687', auth=('neo4j', 'neo4jpassword'))
+with d.session() as s:
+    r = s.run('MATCH (p:Parcel) RETURN count(p) AS cnt')
+    print(f'Parcels: {r.single()[\"cnt\"]}')
+d.close()
+"
+```
+
+---
+
+**User:**
+
+(base) veris-chat $ python -c "
+from neo4j import GraphDatabase
+d = GraphDatabase.driver('bolt://localhost:7687', auth=('neo4j', 'neo4jpassword'))
+with d.session() as s:
+r = s.run('MATCH (p:Parcel) RETURN count(p) AS cnt')
+print(f'Parcels: {r.single()[\"cnt\"]}')
+d.close()
+"
+Traceback (most recent call last):
+File "<string>", line 2, in <module>
+ModuleNotFoundError: No module named 'neo4j'
+
+---
+
+**Assistant:**
+
+你在 `(base)` 环境里，没有 activate `.venv`：
+
+```bash
+source .venv/bin/activate
+```
+
+然后再跑那个 python 命令。
+
+---
+
+**User:**
+
+(.venv) (base) (.venv) veris-chat $ python -c "              
+from neo4j import GraphDatabase
+d = GraphDatabase.driver('bolt://localhost:7687', auth=('neo4j', 'neo4jpassword'))
+with d.session() as s:
+r = s.run('MATCH (p:Parcel) RETURN count(p) AS cnt')
+print(f'Parcels: {r.single()[\"cnt\"]}')
+d.close()
+"
+Parcels: 3690107
+
+---
+
+**Assistant:**
+
+3,690,107 parcels. Neo4j 连接通了。可以开始 Task 2 (KGClient) 了。要现在开始吗？
+
+---
+
+**User:**
+
+Add `neo4j` config block to `config.yaml` with `uri`, `user`, `password` fields
+这个要做吗？
+
+---
+
+**Assistant:**
+
+是的，Task 2 的 KGClient 需要从 config 读连接信息。现在加：
+
+Done. Task 1 fully complete now. Ready for Task 2 (KGClient)?
+
+---
+
+**User:**
+
+但是我在ec2上deployed时候是不用做tunnel也就这个uri的对吧。想要自动是想这个在本地和ec2上不同的自动转换逻辑是写在代码里吗？还是ec2 launch的script里？还是都需要？
+
+---
+
+**Assistant:**
+
+不需要自动转换逻辑。两种情况下 URI 都是 `bolt://localhost:7687`：
+
+- 本地开发：SSH tunnel 把 `localhost:7687` 转发到 EC2 上的 Neo4j
+- EC2 部署（chat backend 和 Neo4j 在同一台机器）：直接 `localhost:7687`
+
+如果 chat backend 和 Neo4j 在不同的 EC2 上（你的情况），EC2 上的 URI 需要改成 Neo4j 的 private IP：
+
+```
+bolt://10.0.2.113:7687   # 如果在同一 VPC
+bolt://54.253.127.203:7687  # 如果用 public IP
+```
+
+最简单的做法：在 EC2 launch script 里用 `sed` 或 `envsubst` 替换 config.yaml 里的 URI。代码里不需要任何转换逻辑，只读 config。
+
+```bash
+# deploy/user_data.sh 里加一行
+sed -i 's|bolt://localhost:7687|bolt://54.253.127.203:7687|' ${APP_DIR}/config.yaml
+```
+
+这样 config.yaml 在 git 里保持 `localhost`（本地开发用），部署时自动替换。
+
+---
+
+**User:**
+
+不是说好了，chat backend 和 Neo4j 不在同一台机器上吗？
+
+---
+
+**Assistant:**
+
+对，不在同一台。所以：
+
+- 本地开发：`bolt://localhost:7687`（通过 SSH tunnel）
+- EC2 部署：`bolt://54.253.127.203:7687`（Neo4j EC2 的 public IP）
+
+config.yaml 保持 `localhost`（本地开发默认值），EC2 deploy script 里替换：
+
+```bash
+# deploy/user_data.sh 里加
+sed -i 's|bolt://localhost:7687|bolt://54.253.127.203:7687|' ${APP_DIR}/config.yaml
+```
+
+代码不需要任何改动。
+
+---
+
+**User:**
+
+好，加进去吧。对了，这个是要放在git clone之后吧
+
+---
+
+**Assistant:**
+
+对，放在 git clone 之后、启动 service 之前。
+
+Done. 放在 `.env` 创建之后、pip install 之前。
+
+---
+
+**User:**
+
+stage and commit
+
+---
+
+**Assistant:**
+
+Done.
+
+---
+
+**User:**
+
+重新analyze下是不是该implement Task 2: Implement KGClient module (`veris_chat/kg/client.py`)
+
+---
+
+**Assistant:**
+
+看下 Task 2 的内容和依赖：
+
+Task 2 的前提条件都满足了：
+- Task 1 ✅ — Neo4j running, SSH tunnel 可用, config.yaml 有 neo4j 配置
+- neo4j Python driver 已安装
+
+Task 2 要实现的：
+1. `veris_chat/kg/__init__.py` + `veris_chat/kg/client.py`
+2. `KGClient` class — 包装 neo4j driver
+3. `get_document_urls(parcel_id)` — 查 PDF URLs
+4. `get_parcel_context(parcel_id)` — 查 7 种 connection types
+5. `close()` — 关闭 driver
+6. `get_kg_client()` — 工厂函数，读 config 并缓存
+
+有一个需要先确认的事：`get_parcel_context()` 的 7 个 Cypher 查询具体返回什么字段，需要先在 Neo4j 上试几个 query 看看实际数据结构。要我先跑几个 sample query 验证，还是直接基于 `SAMPLE_CYPHER_QUERIES.md` 开始写？
+
+---
+
+**User:**
+
+先跑几个 sample query 验证
+
+---
+
+**Assistant:**
+
+Query 太慢了 — 全表扫描 3.69M parcels。用一个已知的 PFI 来测试：
+
+Good data. Let me test more assessment types:
+
+Now I have a clear picture of the actual data structure. Here's what each assessment type returns:
+
+| Type | Key Fields |
+|------|-----------|
+| EnvironmentalAudit | `assessmentDate` |
+| EPALicence | `assessmentDate`, `hasPermissionType` |
+| PrioritySiteRegister | (need to check) |
+| PreliminaryRiskScreeningAssessment | (minimal fields) |
+| GroundwaterQualityRestrictedUseZone | (need to check) |
+| LandfillRegister | (need to check) |
+| Overlay | `assessmentDate`, `hasOverlayType` |
+| HistoricalBusinessListing | `assessmentDate`, `hasBusinessType`, `hasContaminationActivity`, `isHighPotentialContamination`, `isMediumPotentialContamination` |
+| AssessmentReport | `hasLink` (PDF URLs) |
+
+Let me check the remaining types:
+
+---
+
+**User:**
+
+其实我对这个knoweldge graph和它的schema并不了解，也不知道你说的这些type是什么意思。你能想给我解释下吗，from scratch
+
+---
+
+**Assistant:**
+
+这个 KG 的核心概念很简单：
+
+**一块地（Parcel）周围有什么环境风险？**
+
+Victoria 州有 370 万块地（parcels），每块地用 PFI 编号标识。KG 把每块地和它周围的环境评估数据连接起来。
+
+连接方式有两种：
+- `hasOnsiteAssessment` — 这个评估就在这块地上
+- `hasOffsiteAssessment` — 这个评估在附近（比如 500 米内）
+
+连接的 8 种评估类型：
+
+| 类型 | 中文 | 说的是什么 | 例子 |
+|------|------|-----------|------|
+| EnvironmentalAudit | 环境审计 | EPA 指定的审计师做的正式污染评估 | "2024-02-18 完成审计" |
+| EPALicence | EPA 许可证 | 这块地上有需要 EPA 许可的活动 | "A01 (危险废物管理)" |
+| PrioritySiteRegister | 优先场地登记 | EPA 认定的高风险污染场地 | 被列入优先治理名单 |
+| PreliminaryRiskScreeningAssessment (PRSA) | 初步风险筛查 | 对潜在污染的初步评估 | 开发前的风险筛查 |
+| GroundwaterQualityRestrictedUseZone | 地下水限制使用区 | 地下水被污染，限制使用 | 不能打井取水 |
+| LandfillRegister (VLR) | 垃圾填埋场登记 | 附近有（或曾经有）垃圾填埋场 | 500 米内有填埋场 |
+| Overlay | 规划叠加层 | 城市规划中的环境/侵蚀限制 | "丛林火灾管理叠加层" |
+| HistoricalBusinessListing | 历史商业记录 | 这块地上曾经有什么生意（可能造成污染） | "1935 年屠宰场（高污染风险）" |
+
+另外还有 `AssessmentReport`，挂在评估下面，包含 PDF 报告的下载链接。
+
+**Graph 结构：**
+```
+Parcel (PFI: 433375739)
+  ├── hasOnsiteAssessment → EPALicence (危险废物管理许可, 2015)
+  │                           └── hasAssessmentReport → PDF link
+  ├── hasOnsiteAssessment → Overlay (机场环境叠加层)
+  ├── hasOnsiteAssessment → Overlay (丛林火灾管理叠加层)
+  └── hasOffsiteAssessment → LandfillRegister (500米内有填埋场)
+```
+
+**对 chat backend 的意义：**
+- 用户选一块地 → 从 KG 查出所有评估 → 作为 parcel context 告诉 LLM
+- 有 PDF 报告的评估 → 下载 PDF → 做 RAG 检索
+- LLM 就能回答 "这块地有没有污染风险？" "附近有没有填埋场？" 这类问题
+
+---
+
+**User:**
+
+把这个信息放到总结到veris_and_epa.md里
+
+---
+
+**Assistant:**
+
+Done. 要继续跑剩下的 sample queries（PSR, Groundwater, VLR 的字段），还是直接开始写 KGClient？
+
+---
+
+**User:**
+
+继续跑
+
+---
+
+**Assistant:**
+
+Now let me also check AssessmentReport links for different types:
+
+Now I have the complete picture. Here's a summary of all fields per type:
+
+| Assessment Type | Fields | Has PDF? |
+|----------------|--------|----------|
+| EnvironmentalAudit | `assessmentDate` | Yes (4998) |
+| EPALicence | `assessmentDate`, `hasPermissionType` | Yes (714) |
+| PrioritySiteRegister | `hasIssue` | No |
+| PreliminaryRiskScreeningAssessment | (minimal) | Yes (203) |
+| GroundwaterQualityRestrictedUseZone | `assessmentDate`, `hasRestrictedUse` | Yes (864) |
+| LandfillRegister | `hasWasteType` | No |
+| Overlay | `assessmentDate`, `hasOverlayType` | No |
+| HistoricalBusinessListing | `assessmentDate`, `hasBusinessType`, `hasContaminationActivity`, `isHighPotentialContamination`, `isMediumPotentialContamination` | No |
+
+Only 4 types have PDF reports (EnvironmentalAudit, EPALicence, GroundwaterZone, PRSA). Ready to implement KGClient now. Want me to go ahead?
+
+---
+
+**User:**
+
+把这个新拿到的信息整合进veris_and_epa.md的table里
+
+---
+
+**Assistant:**
+
+Done. Table now includes key fields, PDF availability, and counts for each type.
+
+---
+
+**User:**
+
+为什么吧Example data这个column删掉了，对了，我也不知道它是什么意思，给我解释下
+
+---
+
+**Assistant:**
+
+你说得对，不该删。Example data 是从 Neo4j 实际查出来的真实数据值，帮你理解每个字段长什么样。比如：
+
+- `assessmentDate: 2024-02-18` — 这个审计是 2024 年 2 月 18 号做的
+- `hasPermissionType: A01 (Reportable priority waste management)` — 这个 EPA 许可是关于危险废物管理的
+- `hasIssue: Former Industrial Site. Requires ongoing management` — 这块地是前工业用地，需要持续管理
+- `hasRestrictedUse: Drinking water;Irrigation of crops...` — 地下水不能用来喝、灌溉等
+- `hasWasteType: PIW, Putrescible waste, Solid inert waste` — 填埋场里有什么类型的垃圾
+
+让我加回来：
+
+Done. Example data column restored with real values from Neo4j queries.
+
+---
+
+**User:**
+
+等等，knowledge graph不都是entity通过connection链接，assessment types不就是connection types的attributes，这些难道是attributes的具体值
+帮我和chore/knowledge_graph里的知识联系起来
+
+---
+
+**Assistant:**
+
+对，让我用 KG 的术语来解释这个 graph 的结构：
+
+好，现在用 KG 术语来解释这个 Victoria Unearthed graph：
+
+**用你 chore/knowledge_graph 里的概念来对应：**
+
+在你的 PROV 例子里：
+```
+Entity --wasDerivedFrom--> Entity
+```
+
+在 Victoria Unearthed KG 里：
+```
+Entity --relationship--> Entity
+(Parcel) --hasOnsiteAssessment--> (EPALicence)
+```
+
+具体来说：
+
+**Entities（节点）：**
+- `Parcel` — 一块地（3.69M 个）
+- `EPALicence`, `EnvironmentalAudit`, `Overlay`, ... — 各种评估记录
+- `AssessmentReport` — PDF 报告
+
+**Relationships（边/连接）：**
+- `hasOnsiteAssessment` — 地块上有这个评估
+- `hasOffsiteAssessment` — 地块附近有这个评估
+- `hasAssessmentReport` — 评估有 PDF 报告
+
+**Properties（属性）：**
+- 节点上的属性，比如 `Parcel.hasPFI = "433375739"`
+- `assessmentDate`, `hasPermissionType`, `hasBusinessType` 这些都是 entity 的 properties
+
+所以表格里的 "Key fields" 和 "Example data" 就是 entity properties 和它们的具体值：
+
+```
+Entity: EPALicence
+  Property: assessmentDate = "2015-04-16"        ← Key field + Example data
+  Property: hasPermissionType = "A01 (waste...)"  ← Key field + Example data
+```
+
+和你 PROV 例子里的 `rdfs:label = "Kalgoorlie-Boulder..."` 是一样的概念 — 都是 entity 上的 property。
+
+区别是：
+- PROV KG: `Entity --wasDerivedFrom--> Entity`（数据集之间的来源关系）
+- Victoria Unearthed KG: `Parcel --hasOnsiteAssessment--> EPALicence`（地块和环境评估的关系）
+
+要我把这个 KG 术语对应关系也加到 `veris_and_epa.md` 里吗？
+
+---
+
+**User:**
+
+要的。所以最重要的区别是PROV里entity是同质的，都是数据集，但是这个不是对吧
+
+---
+
+**Assistant:**
+
+对。PROV 里 entity 都是 `prov:Entity`（数据集），只是通过 `wasDerivedFrom` 连接。Victoria Unearthed KG 里 entity 有不同类型（Parcel, EPALicence, Overlay...），每种类型有不同的 properties。
+
+Done. Stage and commit, then start KGClient?
+
+---
+
+**User:**
+
+另外Entity是KG的通用定义吗？还有PreliminaryRiskScreeningAssessment	(minimal)是什么意思
+
+---
+
+**Assistant:**
+
+两个问题：
+
+1. **Entity 是 KG 通用定义吗？**
+
+不完全是。不同 KG 体系用不同术语：
+- RDF/PROV: `Entity` 是 W3C 标准里的正式术语
+- Neo4j (Property Graph): 叫 `Node`（节点）
+- 通用 KG 教科书: 一般说 `Entity` 或 `Node`，意思一样
+
+在这个 Victoria Unearthed KG 里，Neo4j 里所有节点都带 `Resource` label（因为从 RDF 导入的），然后额外的 label 区分类型（`Parcel`, `EPALicence` 等）。所以严格说应该叫 "node" 而不是 "entity"，但概念相同。
+
+2. **PRSA `(minimal)` 是什么意思？**
+
+我查 Neo4j 时发现 `PreliminaryRiskScreeningAssessment` 节点几乎没有有意义的 properties — 没有 `assessmentDate`，没有描述字段。只有 `uri` 和 PDF 链接。所以 `(minimal)` 意思是"这个类型的节点属性很少，主要价值在它关联的 PDF 报告里"。
+
+让我把表格里的 `(minimal)` 改成更清楚的描述：
+
+Also fix the terminology table to be more precise:
+
+Done. Commit and start KGClient?
+
+---
+
+**User:**
+
+等等，这个kg是property graph还是rdf graph？
+
+---
+
+**Assistant:**
+
+两者都是。
+
+数据源是 RDF（`.ttl` 和 `.nt` 文件），但通过 n10s (neosemantics) 插件导入到 Neo4j 后，变成了 property graph。
+
+```
+RDF files (.ttl, .nt)
+  ↓ n10s import
+Neo4j Property Graph (Cypher queries)
+```
+
+所以：
+- 原始格式：RDF graph（triples: subject-predicate-object）
+- 存储/查询：Property graph（Neo4j nodes + relationships + properties, Cypher）
+- n10s 做了转换：RDF types → Neo4j labels, RDF properties → Neo4j properties, RDF predicates → Neo4j relationships
+
+这也是为什么 `load_data.sh` 里用 `n10s.rdf.import.fetch()` 而不是直接 Cypher INSERT。
+
+---
+
+**User:**
+
+把这一点也写进去
+
+---
+
+**Assistant:**
+
+Done. Now commit and start KGClient?
+
+---
+
+**User:**
+
+我觉得veris_and_epa.md是不是可以move到chore/knowledge_graph/VERIS/里？
+
+---
+
+**Assistant:**
+
+可以，但 `chore/` 是 symlink 到 `~/git_repo/chore`，那是一个独立的 repo。把 veris-chat 项目的文件移到另一个 repo 里不太合适。
+
+两个选择：
+1. 留在 veris-chat repo 里，移到 `documents/veris_and_epa.md`（和其他项目文档放一起）
+2. 留在根目录不动（现在的位置）
+
+你觉得呢？
+
+---
+
+**User:**
+
+这其实不算项目文件，而是我自己的学习记录
+
+---
+
+**Assistant:**
+
+那放到 chore 里合适。chore 本来就是你的个人知识库。
+
+Moved to `chore/knowledge_graph/VERIS/veris_and_epa.md`. Remember to commit in both repos — veris-chat (delete) and chore (add). Stage and commit now?
+
+---
+
+**User:**
+
+yes
+
+---
+
+**Assistant:**
+
+Now commit in chore repo:
+
+Both repos committed. Ready to start Task 2 (KGClient)?
+
+---
+
+**User:**
+
+yes
+
+---
+
+**Assistant:**
+
+
+
+Let me first check the remaining assessment type fields, then implement KGClient:
+
+Good, now I have all fields. Let me implement KGClient:
+
+---
+
+**User:**
+
+also update chore/knowledge_graph/VERIS/veris_and_epa.md
+
+---
+
+**Assistant:**
+
+你是说把刚查到的 PSR/Groundwater/VLR 字段更新到 veris_and_epa.md 的表格里？
+
+The table already has the correct fields from the earlier queries. The new query just confirmed them. The data matches:
+- PSR: `hasIssue` ✓
+- Groundwater: `assessmentDate`, `hasRestrictedUse` ✓
+- VLR: `hasWasteType` ✓
+
+The table is already accurate. Nothing to update — the fields were inferred correctly from `SAMPLE_CYPHER_QUERIES.md` and now verified against real data.
+
+Let me continue implementing KGClient:
+
+Now let me test it:
+
+`get_document_urls` works. `get_parcel_context` is slow because it runs 7 separate queries. Let me increase timeout:
+
+KGClient works. Results match what we saw in the raw queries:
+- 1 EPA Licence
+- 3 Overlays
+- Everything else: 0 (confirmed absence)
+
+Task 2 done. `get_parcel_context` runs 7 queries sequentially (~30-60s total due to Neo4j on t3.medium with 8.7M nodes). This is fine since results get cached per parcel.
+
+Ready for Task 3 (`format_parcel_context` + `parse_session_id`)?
+
+---
+
+**User:**
+
+how to decrease the time of running get_parcel_context? use better ec2 instance? will get_parcel_context's result be cached?
+
+---
+
+**Assistant:**
+
+三个层面的优化：
+
+**1. Neo4j index（最大提升，免费）**
+
+目前查询慢是因为 `WHERE $pfi IN p.hasPFI` 在 3.69M parcels 上做全表扫描。加一个 index：
+
+```cypher
+CREATE INDEX parcel_pfi FOR (p:Parcel) ON (p.hasPFI)
+```
+
+这能把查询从秒级降到毫秒级。在 EC2 上跑一次就行。
+
+**2. 更大的 EC2 instance**
+
+t3.medium (4GB) 内存不够 Neo4j 缓存所有数据。升级到 t3.large (8GB) 或 r6i.large (16GB) 能让更多数据留在内存里，减少磁盘 I/O。但 index 的效果远大于加内存。
+
+**3. 缓存**
+
+是的，design.md 里已经规划了 parcel cache。在 `chat_api.py` 里：
+
+```python
+_parcel_cache: dict[str, dict] = {}
+# 第一次查 PFI 433375739 → 查 KG → 缓存
+# 后续同一 parcel 的请求 → 直接用缓存，不查 KG
+```
+
+所以慢只发生在每个 parcel 的第一次请求。同一 session 的后续消息直接用缓存。
+
+**建议优先级：先加 index（免费，效果最大），cache 在 Task 5 实现，instance 升级以后再说。**
+
+要我现在在 EC2 上创建 index 吗？
+
+---
+
+**User:**
+
+那你先计算下现在的用时
+然后帮我在ec2上跑一下CREATE INDEX parcel_pfi FOR (p:Parcel) ON (p.hasPFI)，然后再计算下用时，测试下是不是有效果
+
+---
+
+**Assistant:**
+
+
+
+先测 before：
+
+54 seconds total. Overlay (34s) and HistoricalBusinessListing (18s) are the bottlenecks — they have the most nodes (104K and 553K). Now create the index:
+
+Index is online. Now test after:
+
+Index didn't help — still 53s. The problem is that the index is on `p.hasPFI` but the query uses `$pfi IN p.hasPFI` (checking if a value is IN an array). Neo4j's standard index doesn't optimize `IN` on array properties.
+
+The fix is to use a different query pattern. Instead of `WHERE $pfi IN p.hasPFI`, we need to match the parcel first, then traverse:
+
+There's a `n10s_unique_uri` index on `Resource.uri`. Since parcel URIs follow the pattern `http://example.org/data/vic-unearthed/parcel/{PFI}`, we can look up by URI instead:
+
+Still slow. The URI index is a uniqueness constraint, not a lookup index. Let me try a different approach — create a proper text index on hasPFI:
+
+Even URI lookup is 12s. The problem isn't the query pattern — it's that Neo4j on t3.medium with 8.7M nodes and 4GB RAM is I/O bound. The data doesn't fit in memory, so every query hits disk.
+
+Let me check if the issue is cold cache vs warm cache:
+
+First run: 30s (cold cache, reading from disk). Second/third: 4-5s (warm cache). This confirms it's a memory/disk issue.
+
+Summary:
+- Cold cache: ~54s for all 7 queries
+- Warm cache: ~5s per query × 7 = ~35s (still slow because each label query scans differently)
+- With app-level parcel cache (Task 5): 0ms for subsequent messages (only first message is slow)
+
+For now, the practical solution is the parcel cache in `chat_api.py`. First message for a new parcel will be slow (~30-50s), but all follow-up messages in the same session are instant.
+
+Want to continue to Task 3, or optimize Neo4j further first?
+
+---
+
+**User:**
+
+could you make a spec for optimizing neo4j later with all the knowledge and background you have above?
+
+---
+
+**Assistant:**
+
+Done. Spec at `.kiro/specs/neo4j-optimization/design.md` with 5 options ranked by effort/impact. Ready to continue with Task 3 (`format_parcel_context` + `parse_session_id`)?
+
+---
+
+**User:**
+
+now back to Task 2: Implement KGClient module (`veris_chat/kg/client.py`)
+
+---
+
+**Assistant:**
+
+Task 2 is already done. Let me mark it complete and move on:
+
+Looks good. Let me commit the task status update and continue to Task 3:
+
+Ready for Task 3 (`format_parcel_context` + `parse_session_id`). Want me to go ahead?
+
+---
+
+**User:**
+
+yes
+
+---
+
+**Assistant:**
+
+Now update `__init__.py` and test:
+
+---
+
+**User:**
+
+continue
+
+---
+
+**Assistant:**
+
+Test `parse_session_id` and `format_parcel_context`:
+
+Both work. Now commit and mark Task 3 done:
+
+Task 3 done. Ready for Task 4 (modify `service.py` to accept `system_message` + `parcel_context`)?
+
+---
+
+**User:**
+
+Continue Task 4: Modify `service.py` to accept `system_message` and `parcel_context` parameters
+
+---
+
+**Assistant:**
+
+
+
+Let me read the current `chat()` and `async_chat()` signatures to make minimal changes:
+
+Now I need to look at `_augment_query_with_memory` to understand how to integrate the new context layers:
+
+Now I'll modify both functions. The key change: add `system_message` and `parcel_context` params, and integrate them into the query text construction:
+
+Now update `chat()` signature and call:
+
+Now update the `_augment_query_with_memory` call in `chat()`:
+
+Now update `async_chat()` signature:
+
+Now update the `_augment_query_with_memory` call in `async_chat()`:
+
+Clean. Now mark Task 4 done and commit:
+
+Task 4 done. Changes:
+- `chat()` and `async_chat()` now accept `system_message` and `parcel_context` (both optional, backward compatible)
+- `_augment_query_with_memory()` builds 4-layer context: system_message → parcel_context → memory → user query
+
+Ready for Task 5 (modify `chat_api.py` — KG resolution at app level)?
+
+---
+
+**User:**
+
+system message 不用放到Bedrock API system message的位置ok吗？会影响效果吗
+
+---
+
+**Assistant:**
+
+好问题。现在 system message 是拼接到 user query 文本里的，不是放在 Bedrock API 的 system message 位置。
+
+区别：
+
+| 方式 | 实现 | 效果 |
+|------|------|------|
+| 拼接到 query 文本 | `"You are an assistant...\n\nParcel context...\n\nQuestion: ..."` 作为一个 user message | LLM 把所有内容当作 user 输入的一部分 |
+| Bedrock API system message | `messages=[SystemMessage("You are..."), UserMessage("Question")]` | LLM 明确区分 system 指令和 user 输入 |
+
+**会影响效果吗？**
+
+对 Claude 来说，system message 位置有特殊权重 — Claude 会更严格地遵循 system message 里的指令。拼接到 query 里效果会弱一些，特别是：
+- 角色设定（"你是环境评估助手"）
+- 行为约束（"必须引用来源"）
+- 输出格式要求
+
+但目前的架构限制是：`CitationQueryEngine` 只接受一个 query string，不支持传 system message。要用 Bedrock API 的 system message 位置，需要改 `CitationQueryEngine` 或者绕过它。
+
+**对于 `async_chat()`**，我们直接调用 `BedrockConverse.astream_chat(messages)`，可以很容易加 system message：
+
+```python
+messages = [
+    ChatMessage(role=MessageRole.SYSTEM, content=system_message + "\n\n" + parcel_context),
+    ChatMessage(role=MessageRole.USER, content=prompt),
+]
+```
+
+**建议：**
+- `async_chat()`: 改成用 Bedrock API system message（容易改，效果更好）
+- `chat()`: 暂时保持拼接方式（受限于 CitationQueryEngine）
+
+要我现在改 `async_chat()` 吗？
+
+---
+
+**User:**
+
+等等，async_chat用的不也是CitationQueryEngine吗？
+
+---
+
+**Assistant:**
+
+对，但用法不同：
+
+- `chat()`: 调用 `engine.query(query_text)` — CitationQueryEngine 内部调用 LLM，你控制不了 message 结构
+- `async_chat()`: 调用 `engine.prepare_streaming_context(query)` 只做检索+打包，然后自己调用 `streaming_llm.astream_chat(messages)` — 你可以控制 messages 列表
+
+```python
+# async_chat() Step 5 — 你直接构造 messages:
+messages = [ChatMessage(role=MessageRole.USER, content=prompt)]
+stream = await streaming_llm.astream_chat(messages)
+```
+
+这里可以改成：
+```python
+messages = [
+    ChatMessage(role=MessageRole.SYSTEM, content=system_message),
+    ChatMessage(role=MessageRole.USER, content=prompt),
+]
+```
+
+所以 `async_chat()` 用 CitationQueryEngine 只做检索，LLM 调用是自己控制的。
+
+---
+
+**User:**
+
+把这一点写在tasks.md并update tasks 
+
+---
+
+**Assistant:**
+
+Done. Ready for Task 5?
+
+---
+
+**User:**
+
+等等，我不是想把当作future improvement，而是想把这个task update到tasks.md里，然后立马现在就做
+
+---
+
+**Assistant:**
+
+I see the issue — Task 5 subtasks got merged into Task 4. Let me fix:
+
+Now implement the `async_chat()` system message change:
+
+Now for `async_chat()`, the query text should NOT include system_message/parcel_context (since they're in the system message now). Update the `_augment_query_with_memory` call in `async_chat()`:
+
+Now mark the subtask done and commit:
+
+Done. Now in `async_chat()`:
+- `system_message` + `parcel_context` → `ChatMessage(role=SYSTEM)` (Bedrock API system position)
+- `memory_context` → prepended to query text (same as before)
+- Retrieved chunks → in the prompt via `prepare_streaming_context()`
+
+Ready for Task 5 now?
+
+---
+
+**User:**
+
+等等config.yaml streaming_model: "us.anthropic.claude-opus-4-5-20251101-v1:0"是不是可以更新成opus 4.6了，我查了下价格是一样的
+| Model | Bedrock Model ID | Input (on-demand) | Output (on-demand) | Input (batch) | Output (batch) |
+|---|---|---|---|---|---|
+| Claude Opus 4.6 | `anthropic.claude-opus-4-6-v1` | $5.00/M | $25.00/M | $2.50/M | $12.50/M |
+| Claude Opus 4.5 | `anthropic.claude-opus-4-5-20251101-v1:0` | $5.00/M | $25.00/M | $2.50/M | $12.50/M |
+
+---
+
+**Assistant:**
+
+可以，同价格更新版本没理由不升。但要注意 RMIT SCP 可能需要 `us.` 前缀。让我更新 config.yaml：
+
+Also update the comments:
+
+SSO token 过期了。先重新登录：
+
+```bash
+aws sso login
+```
+
+然后再跑测试。
+
+---
+
+**User:**
+
+登录好了
+
+---
+
+**Assistant:**
+
+Opus 4.6 works. Let me commit:
+
+`context_size=200000` is used in `_get_models()` for the old `Bedrock` class (sync `chat()`). The `BedrockConverse` (async) doesn't use it — and as we just tested, Opus 4.6 works without it.
+
+The `Bedrock` class needs `context_size` because Opus 4.6 won't be in its hardcoded foundation model list either. So keep `context_size=200000` there. Let me update the comment:
+
+---
+
+**User:**
+
+等等，上面的测试不正是因为加了context_size才出错的吗，opus-4-6似乎和4.5不一样，不能加context size把？
+
+---
+
+**Assistant:**
+
+不是。那个 `context_size` 错误是因为 `BedrockConverse` 不接受 `context_size` 参数（那是旧 `Bedrock` 类的参数）。和 4.5 vs 4.6 无关。
+
+- `Bedrock` (旧类): 接受 `context_size`
+- `BedrockConverse` (新类): 不接受 `context_size`，自动从 Bedrock API 获取
+
+两个类的参数不同，不是模型版本的问题。Opus 4.6 在 `BedrockConverse` 上工作正常（刚测试通过了）。
+
+不过要检查 `service.py` 里 `_get_streaming_llm` 是否还在传 `context_size`：
+
+`context_size=200000` 只在旧 `Bedrock` 类（sync `chat()`）里用。`BedrockConverse`（async `async_chat()`）没传，没问题。
+
+Opus 4.6 测试通过。Commit：
+
+旧 `Bedrock` 类 + Opus 4.6 + `context_size=200000` 也能正常工作。Deprecation warning 可以忽略。
+
+Commit config 更新：
+
+Done. Ready for Task 5 now?
+
+---
+
+**User:**
+
+今天的工作已经结束了，stop kg instance，然后下个工作日在继续吧
+
+---
+
+**Assistant:**
+
+KG instance stopping. 下次回来：
+
+```bash
+# 1. Start KG instance
+aws ec2 start-instances --region ap-southeast-2 --instance-ids i-018c87e156b4cbd8a
+
+# 2. SSH tunnel
+ssh -fN -L 7687:localhost:7687 -i ~/.ssh/race_lits_server.pem ec2-user@54.253.127.203
+
+# 3. Activate env
+source .venv/bin/activate
+
+# 4. Continue Task 5: Modify chat_api.py
+```
 
 ---

@@ -60,13 +60,13 @@ T7 = Final checkpoint
   - [x] In `async_chat()`, use `ChatMessage(role=SYSTEM)` for system_message + parcel_context instead of prepending to query text
   - _Requirements: 3.1, 2.2_
 
-- [ ] Task 5: Modify `chat_api.py` — KG resolution at app level
-  - [ ] Import `KGClient`, `get_kg_client`, `format_parcel_context`, `parse_session_id` from `veris_chat/kg/`
-  - [ ] Define `APP_SYSTEM_MESSAGE` constant (Layer 1 static system message for environmental assessment assistant)
-  - [ ] Implement parcel cache (`_parcel_cache: dict`) keyed by `parcel_id` to avoid re-querying KG per message
-  - [ ] In `chat_endpoint()`: parse session ID → extract `parcel_id` → check cache → if miss, query KG for `document_urls` and `parcel_context` → cache results → pass `document_urls`, `system_message`, `parcel_context` to `chat()`
-  - [ ] In `chat_stream_endpoint()`: same KG resolution logic as sync endpoint, pass extra params to `async_chat()`
-  - [ ] Keep `document_urls` in `ChatRequest` as optional for backward compatibility
+- [x] Task 5: Modify `chat_api.py` — KG resolution at app level
+  - [x] Import `KGClient`, `get_kg_client`, `format_parcel_context`, `parse_session_id` from `veris_chat/kg/`
+  - [x] Define `APP_SYSTEM_MESSAGE` constant (Layer 1 static system message for environmental assessment assistant)
+  - [x] Implement parcel cache (`_parcel_cache: dict`) keyed by `parcel_id` to avoid re-querying KG per message
+  - [x] In `chat_endpoint()`: parse session ID → extract `parcel_id` → check cache → if miss, query KG for `document_urls` and `parcel_context` → cache results → pass `document_urls`, `system_message`, `parcel_context` to `chat()`
+  - [x] In `chat_stream_endpoint()`: same KG resolution logic as sync endpoint, pass extra params to `async_chat()`
+  - [x] Keep `document_urls` in `ChatRequest` as optional for backward compatibility
   - _Requirements: 1.1, 2.1, 2.2, 3.1_
 
 - [ ] Task 6: Implement session cleanup endpoint

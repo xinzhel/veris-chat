@@ -14,11 +14,14 @@ Test commands (copy-paste ready):
 # Health check
 curl http://localhost:8000/health
 
-# Sync chat
-curl -X POST http://localhost:8000/chat/ -H "Content-Type: application/json" -d '{"session_id": "test", "message": "Hello"}'
+# Sync chat (parcel session — KG resolves URLs and context)
+curl -X POST http://localhost:8000/chat/ -H "Content-Type: application/json" -d '{"session_id": "433375739::test1", "message": "Is this a priority site?"}'
 
-# Streaming chat
-curl -X POST http://localhost:8000/chat/stream/ -H "Content-Type: application/json" -d '{"session_id": "test", "message": "Hello"}' --no-buffer
+# Streaming chat (parcel session)
+curl -X POST http://localhost:8000/chat/stream/ -H "Content-Type: application/json" -d '{"session_id": "433375739::test1", "message": "What audits were done?"}' --no-buffer
+
+# Backward compatible (no parcel, manual document_urls)
+curl -X POST http://localhost:8000/chat/ -H "Content-Type: application/json" -d '{"session_id": "test", "message": "Hello"}'
 """
 
 import os
@@ -39,10 +42,23 @@ from veris_chat.chat.service import (
     OpenAIStreamFormatter,
     format_chat_response_openai,
 )
+from veris_chat.kg import get_kg_client, format_parcel_context, parse_session_id
 from veris_chat.utils.logger import setup_logging
+
+# =============================================================================
+# APPLICATION SYSTEM MESSAGE (Layer 1 — static)
+# =============================================================================
+
+APP_SYSTEM_MESSAGE = """You are an environmental assessment assistant for Victorian land parcels.
+You answer questions grounded in assessment reports and knowledge graph data.
+When referencing information from source documents, cite them using the provided markdown link format.
+If the parcel context below indicates "No data found" for a category, that means we confirmed there is no data — not that we failed to check."""
 
 # Session-specific loggers cache
 _session_loggers: Dict[str, any] = {}
+
+# Parcel cache: parcel_id → {"document_urls": [...], "parcel_context": "...", "cached_at": ...}
+_parcel_cache: Dict[str, Dict[str, Any]] = {}
 
 
 def get_session_logger(session_id: str):
@@ -68,6 +84,51 @@ app = FastAPI(
     description="Document-grounded conversational system with citation support",
     version="1.0.0",
 )
+
+
+def _resolve_parcel_data(session_id: str, logger) -> Dict[str, Any]:
+    """
+    Resolve document URLs and parcel context from KG.
+    
+    Parses session_id as parcel_id::temp_id, queries KG, caches results.
+    Falls back gracefully if session_id doesn't contain '::' (backward compat).
+    
+    Returns:
+        Dict with keys: document_urls, system_message, parcel_context, parcel_id.
+        All values are None if session_id is not parcel-format.
+    """
+    try:
+        parcel_id, temp_id = parse_session_id(session_id)
+    except ValueError:
+        # Not a parcel session — backward compatible, no KG resolution
+        return {"document_urls": None, "system_message": None, "parcel_context": None, "parcel_id": None}
+    
+    # Check cache
+    if parcel_id in _parcel_cache:
+        cached = _parcel_cache[parcel_id]
+        logger.info(f"[API] Parcel cache hit for PFI {parcel_id}")
+        return cached
+    
+    # Query KG
+    logger.info(f"[API] Querying KG for PFI {parcel_id}...")
+    kg_client = get_kg_client()
+    
+    document_urls = kg_client.get_document_urls(parcel_id)
+    kg_context = kg_client.get_parcel_context(parcel_id)
+    parcel_context_str = format_parcel_context(parcel_id, kg_context)
+    
+    result = {
+        "document_urls": document_urls if document_urls else None,
+        "system_message": APP_SYSTEM_MESSAGE,
+        "parcel_context": parcel_context_str,
+        "parcel_id": parcel_id,
+    }
+    
+    # Cache
+    _parcel_cache[parcel_id] = result
+    logger.info(f"[API] Cached parcel data for PFI {parcel_id}: {len(document_urls)} URLs")
+    
+    return result
 
 
 # =============================================================================
@@ -173,13 +234,21 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
     logger.info(f"[{timestamp}] /chat/ request: session_id={request.session_id}, message={request.message[:50]}...")
     
     try:
+        # Resolve parcel data from KG (if parcel session)
+        parcel_data = _resolve_parcel_data(request.session_id, logger)
+        
+        # KG-resolved URLs override request document_urls
+        document_urls = parcel_data["document_urls"] or request.document_urls
+        
         result = chat(
             session_id=request.session_id,
             message=request.message,
-            document_urls=request.document_urls,
+            document_urls=document_urls,
             top_k=request.top_k,
             use_memory=request.use_memory,
             citation_style=request.citation_style,
+            system_message=parcel_data["system_message"],
+            parcel_context=parcel_data["parcel_context"],
         )
         
         timing = result.get("timing", {})
@@ -220,14 +289,20 @@ async def chat_stream_endpoint(request: ChatRequest):
         
         formatter = OpenAIStreamFormatter()
         
+        # Resolve parcel data from KG (if parcel session)
+        parcel_data = _resolve_parcel_data(request.session_id, logger)
+        document_urls = parcel_data["document_urls"] or request.document_urls
+        
         try:
             async for chunk in async_chat(
                 session_id=request.session_id,
                 message=request.message,
-                document_urls=request.document_urls,
+                document_urls=document_urls,
                 top_k=request.top_k,
                 use_memory=request.use_memory,
                 citation_style=request.citation_style,
+                system_message=parcel_data["system_message"],
+                parcel_context=parcel_data["parcel_context"],
             ):
                 if chunk.get("type") == "done":
                     timing = chunk.get("timing", {})
