@@ -9,7 +9,7 @@ Based on the requirements in `documents/requirement_design.md`, this plan implem
 ---
 
 - [x] 1. Set up Core Configuration and Bedrock Integration
-  - [x] 1.1 Create `veris_chat/chat/config.py` - simple config loader
+  - [x] 1.1 Create `rag_core/chat/config.py` - simple config loader
     - Load config.yaml and .env using yaml/dotenv
     - Return dict with model names, Qdrant settings
     - Support AWS SSO fallback when env vars empty
@@ -20,7 +20,7 @@ Based on the requirements in `documents/requirement_design.md`, this plan implem
     - _Requirements: 2.3.1, 2.3.2_
 
 - [x] 2. Verify and Extend Ingestion Pipeline with session_id
-  - [x] 2.1 Update `veris_chat/ingestion/main_client.py` to support session_id
+  - [x] 2.1 Update `rag_core/ingestion/main_client.py` to support session_id
     - Add `session_id` parameter to `store()` method
     - **Note**: Task 7.4 redesigns this - session_id tracked in session_index, NOT in Qdrant payload
     - Qdrant payload: `url`, `filename`, `page_number`, `chunk_id`, `chunk_index`, `section_header`, `text`
@@ -34,7 +34,7 @@ Based on the requirements in `documents/requirement_design.md`, this plan implem
     - _Requirements: 1_
 
 - [x] 3. Implement Session-Scoped Retrieval (Direct LlamaIndex)
-  - [x] 3.1 Create `veris_chat/chat/retriever.py` - thin utility functions
+  - [x] 3.1 Create `rag_core/chat/retriever.py` - thin utility functions
     - `get_vector_index()`: return VectorStoreIndex with QdrantVectorStore
     - `retrieve_with_session_filter(index, query, session_id, top_k)`: use Qdrant filter on session_id
     - **Note**: Task 7.4 changes filter from `session_id` to `url IN session_urls` (MatchAny)
@@ -51,7 +51,7 @@ Based on the requirements in `documents/requirement_design.md`, this plan implem
     - Use CitationQueryEngine.from_args() directly with session index
     - Extract source nodes metadata for citations
     - _Requirements: 2.2, 2.3.3_
-  - [x] 4.2 Add citation formatting functions to `veris_chat/chat/retriever.py`
+  - [x] 4.2 Add citation formatting functions to `rag_core/chat/retriever.py`
     - `format_citations(source_nodes, style="inline")`: format metadata as citations
     - Support inline/bracket/footnote styles
     - _Requirements: 2.2_
@@ -96,7 +96,7 @@ Based on the requirements in `documents/requirement_design.md`, this plan implem
   - Ensure all tests pass, ask the user if questions arise.
 
 - [-] 7. Build Chat Service (Single Orchestration Module)
-  - [x] 7.1 Create `veris_chat/chat/service.py` - main chat function
+  - [x] 7.1 Create `rag_core/chat/service.py` - main chat function
     - `chat(session_id, message, document_urls=None)`: orchestrate full flow
     - Use IngestionClient for document ingestion (already exists)
     - Use retriever functions for session-scoped retrieval
@@ -170,10 +170,10 @@ Based on the requirements in `documents/requirement_design.md`, this plan implem
       - Clean separation: ingestion knows nothing about sessions
       - Graceful fallback when no documents provided
     - **Files modified**:
-      - `veris_chat/ingestion/main_client.py`: Added session_index, updated store(), removed session_id from Qdrant payload
-      - `veris_chat/chat/retriever.py`: Added `retrieve_with_url_filter()`, `retrieve_for_urls()`
-      - `veris_chat/chat/service.py`: Updated `_create_session_retriever()` to use URL filter + NoOpRetriever
-      - `veris_chat/utils/citation_query_engine.py`: Added `NoOpRetriever` class
+      - `rag_core/ingestion/main_client.py`: Added session_index, updated store(), removed session_id from Qdrant payload
+      - `rag_core/chat/retriever.py`: Added `retrieve_with_url_filter()`, `retrieve_for_urls()`
+      - `rag_core/chat/service.py`: Updated `_create_session_retriever()` to use URL filter + NoOpRetriever
+      - `rag_core/utils/citation_query_engine.py`: Added `NoOpRetriever` class
     - _Requirements: 1, 2.1_
 
 - [x] 8. Implement FastAPI Endpoints

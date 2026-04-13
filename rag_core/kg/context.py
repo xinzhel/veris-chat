@@ -5,7 +5,7 @@ Converts KGClient output into natural-language context for LLM system messages,
 and parses session IDs in the format `parcel_id::temp_id`.
 
 Usage:
-    from veris_chat.kg.context import format_parcel_context, parse_session_id
+    from rag_core.kg.context import format_parcel_context, parse_session_id
 
     parcel_id, temp_id = parse_session_id("433375739::abc123")
     context = kg_client.get_parcel_context(parcel_id)

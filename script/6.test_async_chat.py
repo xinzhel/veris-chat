@@ -22,8 +22,8 @@ os.environ["AWS_REGION"] = "ap-southeast-2"
 
 sys.path.insert(0, ".")
 
-from veris_chat.chat.config import load_config
-from veris_chat.utils.logger import setup_logging
+from rag_core.chat.config import load_config
+from rag_core.utils.logger import setup_logging
 
 # Setup logging
 logger = setup_logging(
@@ -31,7 +31,7 @@ logger = setup_logging(
     result_dir="./logs",
     add_console_handler=True,
     verbose=True,
-    allowed_namespaces=("veris_chat", "__main__"),
+    allowed_namespaces=("rag_core", "__main__"),
 )
 
 
@@ -62,9 +62,9 @@ async def test_async_chat_streaming():
     log_print("Test 1: Async Streaming Chat")
     log_print("=" * 60)
     
-    from veris_chat.chat.service import async_chat
-    from veris_chat.ingestion.main_client import IngestionClient
-    from veris_chat.chat.config import load_config
+    from rag_core.chat.service import async_chat
+    from rag_core.ingestion.main_client import IngestionClient
+    from rag_core.chat.config import load_config
 
     # -----------------------------------------------------------------------------
     # Reset collection for clean test state
@@ -156,7 +156,7 @@ async def test_follow_up_streaming():
     log_print("Test 2: Follow-up Streaming Chat (no ingestion)")
     log_print("=" * 60)
     
-    from veris_chat.chat.service import async_chat
+    from rag_core.chat.service import async_chat
     
     message = "What specific permits or licenses are mentioned in the document?"
     
@@ -208,7 +208,7 @@ async def test_comparison_with_sync():
     log_print("Test 3: Comparison - Async vs Sync")
     log_print("=" * 60)
     
-    from veris_chat.chat.service import async_chat, chat
+    from rag_core.chat.service import async_chat, chat
     
     message = "What is the license number?"
     log_print(f"\nQuery: {message}")

@@ -14,8 +14,8 @@ Usage: Run in interactive notebook mode or as a script.
 import sys
 sys.path.insert(0, ".")
 
-from veris_chat.chat.config import load_config, get_bedrock_kwargs
-from veris_chat.utils.logger import setup_logging
+from rag_core.chat.config import load_config, get_bedrock_kwargs
+from rag_core.utils.logger import setup_logging
 
 # Setup logging
 setup_logging(
@@ -23,7 +23,7 @@ setup_logging(
     result_dir="./logs",
     add_console_handler=True,
     verbose=True,
-    allowed_namespaces=("veris_chat", "__main__"),
+    allowed_namespaces=("rag_core", "__main__"),
 )
 
 print("=" * 60)
@@ -69,12 +69,12 @@ print("  ✓ BedrockEmbedding initialized")
 # -----------------------------------------------------------------------------
 print("\n[2/4] Testing get_session_index...")
 
-from veris_chat.chat.retriever import (
+from rag_core.chat.retriever import (
     get_vector_index,
     retrieve_with_url_filter,  # NEW: URL-based filter
     retrieve_nodes_metadata,
 )
-from veris_chat.ingestion.main_client import IngestionClient  # NEW: Get session URLs
+from rag_core.ingestion.main_client import IngestionClient  # NEW: Get session URLs
 
 index = get_vector_index(
     collection_name=TEST_COLLECTION,

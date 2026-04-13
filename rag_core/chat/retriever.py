@@ -5,7 +5,7 @@ Thin utility functions using LlamaIndex directly for session-filtered
 vector retrieval from Qdrant.
 
 Usage (high-level):
-    from veris_chat.chat.retriever import retrieve_for_session
+    from rag_core.chat.retriever import retrieve_for_session
     
     # Single function that coordinates everything
     results = retrieve_for_session(query="What is the site status?", session_id="a157", top_k=5)
@@ -13,7 +13,7 @@ Usage (high-level):
         print(f"{r['filename']} (p.{r['page_number']}): {r['text'][:100]}...")
 
 Usage (low-level):
-    from veris_chat.chat.retriever import get_vector_index, retrieve_with_session_filter, retrieve_nodes_metadata
+    from rag_core.chat.retriever import get_vector_index, retrieve_with_session_filter, retrieve_nodes_metadata
     
     index = get_vector_index()  # 1. Create index (reusable)
     nodes = retrieve_with_session_filter(index, "query", "a157", top_k=5)  # 2. Retrieve
@@ -39,7 +39,7 @@ except ImportError:
         "qdrant-client is not installed. Install with: pip install qdrant-client"
     )
 
-from veris_chat.chat.config import load_config, get_bedrock_kwargs
+from rag_core.chat.config import load_config, get_bedrock_kwargs
 
 
 def get_qdrant_client(
@@ -375,7 +375,7 @@ def retrieve_for_urls(
         List of dicts with citation metadata: filename, page_number, url, chunk_index, text, score.
         
     Example:
-        from veris_chat.ingestion.main_client import IngestionClient
+        from rag_core.ingestion.main_client import IngestionClient
         
         client = IngestionClient()
         urls = client.get_session_urls("session_123")  # Get URLs from session_index
@@ -511,7 +511,7 @@ def get_session_memory(
         import os
         os.environ["AWS_REGION"] = "ap-southeast-2"
         
-        from veris_chat.chat.retriever import get_session_memory
+        from rag_core.chat.retriever import get_session_memory
         memory = get_session_memory("a157")
         
         # Add a message to memory
@@ -521,7 +521,7 @@ def get_session_memory(
         # Get chat history with memory context
         messages = memory.get(input="What did we discuss?")
     """
-    from veris_chat.utils.memory import Mem0Memory
+    from rag_core.utils.memory import Mem0Memory
     
     logger.info(f"[MEMORY] Creating Mem0Memory for session_id={session_id}")
     

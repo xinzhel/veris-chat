@@ -6,77 +6,148 @@ When a user says "summarize this PDF: https://xxx" or "what's in https://xxx", t
 1. Ignores URLs in the user message (only uses KG-resolved or request-supplied `document_urls`)
 2. Uses top-K chunk retrieval, which doesn't work for "summarize the whole document"
 
-## Current Architecture (Pipeline)
+## Design Principle
+
+**Don't touch existing RAG workflow.** The current `chat()` / `async_chat()` pipeline stays as-is. The agent is a new, separate subpackage that can call into existing components as tools.
+
+## Package Structure
 
 ```
-User message → Ingest KG URLs → Retrieve top-K chunks → Generate with citations
+rag_core/       ← existing RAG pipeline (untouched)
+  chat/
+    service.py
+    retriever.py
+    config.py
+  ingestion/
+    main_client.py
+  kg/
+    client.py
+    context.py
+  utils/
+
+agent/          ← NEW: top-level, not inside rag_core
+  __init__.py
+  tools.py      ← tool definitions (ingest_pdf, search_docs, get_all_chunks)
+  loop.py       ← ReAct tool-use loop with BedrockConverse
+
+app/            ← application layer (chat_api.py)
 ```
 
-Fixed pipeline: every message goes through the same steps regardless of intent.
+`agent/` is a top-level package that imports from `rag_core/` but `rag_core/` never imports from `agent/`.
 
-## Proposed Architecture (ReAct Agent)
+## Architecture
+
+### Current Pipeline (unchanged)
 
 ```
-User message → LLM Agent decides → Tool calls → Response
+chat_api.py → service.chat() → fixed pipeline → response
 ```
 
-The LLM (Opus 4.6 with strong tool use) decides what to do based on the user's intent:
+### New Agent Mode (parallel path)
 
-| User Intent | Agent Action |
-|-------------|-------------|
-| "Is this a priority site?" | Use `retrieve_chunks` tool → answer with citations |
-| "Summarize https://xxx.pdf" | Use `ingest_url` tool → `retrieve_all_chunks` tool → summarize |
-| "What's in this link?" | Use `ingest_url` tool → `retrieve_chunks` tool → answer |
-| "What is contamination?" | No tool needed → answer from general knowledge + parcel context |
+```
+chat_api.py → agent.loop.agent_chat() → ReAct loop → response
+```
 
-### Tools Available to Agent
+`chat_api.py` decides which path based on config or request parameter.
 
-1. `ingest_url(url)` — Download, parse, chunk, embed, store a PDF URL
-2. `retrieve_chunks(query, top_k)` — Semantic search over session documents
-3. `retrieve_all_chunks(url)` — Get ALL chunks for a specific document (for summarization)
-4. `get_parcel_context(parcel_id)` — Already resolved at app level, injected as system message
+## ReAct Loop (`agent/loop.py`)
 
-### How It Fits with Current Architecture
-
-The agent approach wraps the existing pipeline components as tools:
-- `ingest_url` → calls `IngestionClient.store()`
-- `retrieve_chunks` → calls existing retriever
-- `retrieve_all_chunks` → new: retrieves all chunks for a URL (no semantic search, just filter by URL)
-
-`chat_api.py` still resolves parcel data from KG and passes `system_message` + `parcel_context`.
-The difference is that `service.py` uses an agent loop instead of a fixed pipeline.
-
-### LlamaIndex ReAct Agent
-
-LlamaIndex has built-in ReAct agent support:
+Uses Bedrock's native tool use API (not text-parsing like some frameworks). Opus 4.6 has strong tool use support.
 
 ```python
-from llama_index.core.agent import ReActAgent
-from llama_index.core.tools import FunctionTool
-
-tools = [
-    FunctionTool.from_defaults(fn=ingest_url, name="ingest_url", description="..."),
-    FunctionTool.from_defaults(fn=retrieve_chunks, name="retrieve_chunks", description="..."),
-]
-
-agent = ReActAgent.from_tools(tools, llm=llm, verbose=True)
-response = agent.chat("Summarize this PDF: https://xxx")
+async def agent_chat(session_id, message, system_message, parcel_context, ...):
+    """ReAct tool-use loop with streaming final answer."""
+    messages = build_initial_messages(system_message, parcel_context, message)
+    
+    while True:
+        response = await llm.achat(messages, tools=tool_schemas)
+        
+        if response.has_tool_calls:
+            for tool_call in response.tool_calls:
+                result = execute_tool(tool_call, session_id)
+                messages.append(tool_result_message(result))
+        else:
+            # Final answer — stream it
+            async for chunk in llm.astream_chat(messages):
+                yield {"type": "token", "content": chunk.delta}
+            break
 ```
 
-### Migration Path
+## Tools (`agent/tools.py`)
 
-1. Keep current `chat()` as fallback (non-agent mode)
-2. Add `agent_chat()` that uses ReAct agent with tools
-3. Toggle via config or request parameter
-4. Gradually migrate once agent mode is validated
+Tool interface follows lits_llm's `BaseTool` pattern: `name`, `description`, `args_schema` (Pydantic), `_run()`.
+
+Note: lits_llm has its own general LLM interface that includes BedrockConverse — not litellm.
+
+| Tool | Description | Wraps existing code |
+|------|-------------|---------------------|
+| `ingest_pdf` | Download + ingest a PDF URL into session | `IngestionClient.store(url, session_id)` |
+| `search_documents` | Semantic search over session documents | `retrieve_with_url_filter()` |
+| `get_all_chunks` | Get ALL chunks for a URL (for summarization) | New: Qdrant filter by URL, return all |
+
+Tools are thin wrappers around existing components. No duplication of ingestion/retrieval logic.
+
+### Tool Schema Example (for Bedrock tool use API)
+
+```python
+tool_schemas = [
+    {
+        "name": "ingest_pdf",
+        "description": "Download and ingest a PDF from URL into the session's document store",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "PDF URL to ingest"}
+            },
+            "required": ["url"]
+        }
+    },
+    ...
+]
+```
+
+## Integration with chat_api.py
+
+```python
+# chat_api.py
+from agent import agent_chat  # new import
+
+@app.post("/chat/stream/")
+async def chat_stream_endpoint(request: ChatRequest):
+    parcel_data = _resolve_parcel_data(request.session_id, logger)
+    
+    if request.use_agent:  # or config-based toggle
+        generator = agent_chat(...)
+    else:
+        generator = async_chat(...)  # existing pipeline
+    
+    # Same SSE streaming for both
+    async def generate():
+        async for chunk in generator:
+            yield formatter.format_sse(chunk)
+```
+
+## What We Reuse from lits_llm
+
+1. **Tool interface pattern**: `BaseTool` with `name`, `description`, `args_schema`, `_run()`
+2. **PDFQueryTool concept**: URL + query → retrieve relevant chunks
+3. **Loop structure**: `while not answer: get_action → execute → append`
+
+What we DON'T reuse:
+- LiTS framework (policy, transition, reward, state) — overkill for chat
+- Text-based action parsing — Bedrock has native tool use API
+- Evaluation/benchmarking infrastructure
 
 ## Scope
 
-This spec covers:
-- URL extraction from user messages (agent decides when to ingest)
-- Full-document summarization (agent uses `retrieve_all_chunks`)
-- ReAct agent integration with existing tools
+Covers:
+- `agent/` subpackage (tools + loop)
+- Bedrock native tool use integration
+- Streaming support for final answer
+- Toggle between pipeline and agent mode
 
-This spec does NOT cover:
-- Multi-step retrieval / query rewriting (future Agentic RAG)
-- Self-critique / reflection loops (future)
+Does NOT cover:
+- Multi-step retrieval / query rewriting
+- Self-critique / reflection loops
+- Modifying existing `chat/service.py`

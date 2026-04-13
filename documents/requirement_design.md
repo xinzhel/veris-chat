@@ -31,7 +31,7 @@ If no document URLs are provided, the system still responds using conversation m
         async.md (sync vs async concurrency Q&A)
         bedrock_caveats.md
 
-    /veris_chat/ 
+    /rag_core/ 
         chat/
             config.py       (config loader)
             retriever.py    (retrieval + memory + citation formatting)

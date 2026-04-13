@@ -20,10 +20,10 @@ from typing import List, Dict, Any, Optional, Set
 from pathlib import Path
 import logging
 
-from veris_chat.ingestion.embed_core import Embedder
-from veris_chat.ingestion.download_core import process_url as download_pdf_url
-from veris_chat.ingestion.parse_core import process_pdf
-from veris_chat.ingestion.chunk_core import chunk_pages
+from rag_core.ingestion.embed_core import Embedder
+from rag_core.ingestion.download_core import process_url as download_pdf_url
+from rag_core.ingestion.parse_core import process_pdf
+from rag_core.ingestion.chunk_core import chunk_pages
 
 try:
     from qdrant_client import QdrantClient

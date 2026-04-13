@@ -32,8 +32,8 @@ T7 = Final checkpoint
   - [x] Add `neo4j` Python driver to `environment.yaml` dependencies
   - _Requirements: 4.1, 4.2_
 
-- [x] Task 2: Implement KGClient module (`veris_chat/kg/client.py`)
-  - [x] Create `veris_chat/kg/__init__.py` and `veris_chat/kg/client.py`
+- [x] Task 2: Implement KGClient module (`rag_core/kg/client.py`)
+  - [x] Create `rag_core/kg/__init__.py` and `rag_core/kg/client.py`
   - [x] Implement `KGClient.__init__(uri, user, password)` — wraps `neo4j.GraphDatabase.driver`
   - [x] Implement `get_document_urls(parcel_id) -> list[str]` — Cypher query: `MATCH (p:Parcel)-[:hasOnsiteAssessment|hasOffsiteAssessment]->(a:Resource)-[:hasAssessmentReport]->(r:AssessmentReport) WHERE parcel_id IN p.hasPFI RETURN r.hasLink[0] AS pdf_url`
   - [x] Implement `get_parcel_context(parcel_id) -> dict` — returns dict with 7 keys: `audits`, `licences`, `prsa`, `psr`, `vlr`, `overlays`, `business_listings`. Each value is a list of dicts with assessment-specific fields from the KG
@@ -42,8 +42,8 @@ T7 = Final checkpoint
   - Note: Query performance ~54s cold / ~35s warm on t3.medium. See `.kiro/specs/neo4j-optimization/` for optimization plan.
   - _Requirements: 2.1, 2.3, 3.1_
 
-- [x] Task 3: Implement `format_parcel_context()` (`veris_chat/kg/context.py`)
-  - [x] Create `veris_chat/kg/context.py`
+- [x] Task 3: Implement `format_parcel_context()` (`rag_core/kg/context.py`)
+  - [x] Create `rag_core/kg/context.py`
   - [x] Implement `format_parcel_context(parcel_id, kg_context) -> str` — converts the dict from `get_parcel_context()` into a natural-language system message block with section headers for all 7 connection types
   - [x] For empty connection types, output "No data found" (confirmed absence, not missing info — see design Q&A)
   - [x] Implement `parse_session_id(session_id) -> tuple[str, str]` — splits `parcel_id::temp_id`, raises `ValueError` if `::` separator missing
@@ -61,7 +61,7 @@ T7 = Final checkpoint
   - _Requirements: 3.1, 2.2_
 
 - [x] Task 5: Modify `chat_api.py` — KG resolution at app level
-  - [x] Import `KGClient`, `get_kg_client`, `format_parcel_context`, `parse_session_id` from `veris_chat/kg/`
+  - [x] Import `KGClient`, `get_kg_client`, `format_parcel_context`, `parse_session_id` from `rag_core/kg/`
   - [x] Define `APP_SYSTEM_MESSAGE` constant (Layer 1 static system message for environmental assessment assistant)
   - [x] Implement parcel cache (`_parcel_cache: dict`) keyed by `parcel_id` to avoid re-querying KG per message
   - [x] In `chat_endpoint()`: parse session ID → extract `parcel_id` → check cache → if miss, query KG for `document_urls` and `parcel_context` → cache results → pass `document_urls`, `system_message`, `parcel_context` to `chat()`
@@ -86,5 +86,5 @@ T7 = Final checkpoint
 
 - Tasks marked with `*` are optional and can be skipped for faster MVP
 - Task 1 (EC2 deployment) is a prerequisite for all subsequent tasks — KGClient needs a running Neo4j instance
-- `service.py` stays application-agnostic: it never imports from `veris_chat/kg/` or knows about parcels
-- All KG resolution logic lives in `chat_api.py` (app/ layer) and `veris_chat/kg/` (library layer)
+- `service.py` stays application-agnostic: it never imports from `rag_core/kg/` or knows about parcels
+- All KG resolution logic lives in `chat_api.py` (app/ layer) and `rag_core/kg/` (library layer)

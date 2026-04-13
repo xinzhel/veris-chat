@@ -5,7 +5,7 @@ Wraps the Neo4j Python driver to query parcel assessments and PDF report URLs.
 Connection config is read from config.yaml under the 'neo4j' key.
 
 Usage:
-    from veris_chat.kg.client import get_kg_client
+    from rag_core.kg.client import get_kg_client
 
     client = get_kg_client()
     urls = client.get_document_urls("433375739")
@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from neo4j import GraphDatabase
 
-from veris_chat.chat.config import load_config
+from rag_core.chat.config import load_config
 
 logger = logging.getLogger(__name__)
 

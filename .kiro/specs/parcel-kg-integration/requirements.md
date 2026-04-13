@@ -10,7 +10,7 @@ Sessions are parcel-wise — each session is scoped to a specific parcel. Since 
 - **Parcel_ID**: A geospatial location identifier for a parcel
 - **Temp_ID**: A temporary identifier to distinguish multiple users opening sessions for the same parcel
 - **Knowledge_Graph**: The Neo4j knowledge graph deployed from `neptune_deployment/vic_unearthed_kg/`
-- **Backend_Service**: The existing chat backend service (`veris_chat/chat/service.py`, `app/chat_api.py`)
+- **Backend_Service**: The existing chat backend service (`rag_core/chat/service.py`, `app/chat_api.py`)
 - **System_Message**: The LLM system prompt that provides first-layer application context (e.g., role, behavior) and second-layer parcel-specific context from the knowledge graph
 
 ## Requirements

@@ -31,8 +31,8 @@ os.environ["AWS_REGION"] = "ap-southeast-2"
 
 sys.path.insert(0, ".")
 
-from veris_chat.chat.config import load_config
-from veris_chat.utils.logger import setup_logging
+from rag_core.chat.config import load_config
+from rag_core.utils.logger import setup_logging
 
 # Setup logging
 logger = setup_logging(
@@ -40,7 +40,7 @@ logger = setup_logging(
     result_dir="./logs",
     add_console_handler=True,
     verbose=True,
-    allowed_namespaces=("veris_chat", "__main__"),
+    allowed_namespaces=("rag_core", "__main__"),
 )
 
 logger.info("=" * 60)
@@ -87,7 +87,7 @@ if qdrant_url:
 # -----------------------------------------------------------------------------
 logger.info("[1/4] Testing get_session_memory...")
 
-from veris_chat.chat.retriever import get_session_memory
+from rag_core.chat.retriever import get_session_memory
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
 
 memory1 = get_session_memory(TEST_SESSION_ID_1)

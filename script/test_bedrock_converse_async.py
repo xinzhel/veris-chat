@@ -15,7 +15,7 @@ import time
 # Add project root to path for config import
 sys.path.insert(0, ".")
 
-from veris_chat.chat.config import load_config, get_bedrock_kwargs
+from rag_core.chat.config import load_config, get_bedrock_kwargs
 from llama_index.llms.bedrock_converse import BedrockConverse
 from llama_index.core.llms import ChatMessage
 

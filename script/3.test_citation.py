@@ -17,8 +17,8 @@ import logging
 
 sys.path.insert(0, ".")
 
-from veris_chat.chat.config import load_config, get_bedrock_kwargs
-from veris_chat.utils.logger import setup_logging, print_timing_summary
+from rag_core.chat.config import load_config, get_bedrock_kwargs
+from rag_core.utils.logger import setup_logging, print_timing_summary
 
 # Setup logging
 logger = setup_logging(
@@ -26,12 +26,12 @@ logger = setup_logging(
     result_dir="./logs",
     add_console_handler=True,
     verbose=True,
-    allowed_namespaces=("veris_chat", "__main__"),
+    allowed_namespaces=("rag_core", "__main__"),
 )
 logger.info("\n\n")
 
 # Get logger
-timing_logger = logging.getLogger("veris_chat.timing")
+timing_logger = logging.getLogger("rag_core.timing")
 # Timing results storage
 timing_results = {}
 
@@ -92,7 +92,7 @@ Settings.llm = llm
 # -----------------------------------------------------------------------------
 print("\n[2/6] Creating VectorStoreIndex...")
 
-from veris_chat.chat.retriever import get_vector_index
+from rag_core.chat.retriever import get_vector_index
 
 t_start = time.perf_counter()
 index = get_vector_index(
@@ -109,8 +109,8 @@ print(f"  ⏱ Index creation time: {timing_results['index_creation']:.3f}s")
 # -----------------------------------------------------------------------------
 print("\n[3/6] Creating CitationQueryEngine...")
 
-from veris_chat.utils.citation_query_engine import CitationQueryEngine
-from veris_chat.chat.retriever import retrieve_nodes_metadata
+from rag_core.utils.citation_query_engine import CitationQueryEngine
+from rag_core.chat.retriever import retrieve_nodes_metadata
 
 engine = CitationQueryEngine.from_args(
     index=index,
@@ -193,7 +193,7 @@ else:
 # -----------------------------------------------------------------------------
 print("\n[6/6] Testing citation formatting functions...")
 
-from veris_chat.chat.retriever import (
+from rag_core.chat.retriever import (
     format_citations,
     format_citations_for_response,
 )

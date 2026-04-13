@@ -36,14 +36,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from veris_chat.chat.service import (
+from rag_core.chat.service import (
     chat,
     async_chat,
     OpenAIStreamFormatter,
     format_chat_response_openai,
 )
-from veris_chat.kg import get_kg_client, format_parcel_context, parse_session_id
-from veris_chat.utils.logger import setup_logging
+from rag_core.kg import get_kg_client, format_parcel_context, parse_session_id
+from rag_core.utils.logger import setup_logging
 
 # =============================================================================
 # APPLICATION SYSTEM MESSAGE (Layer 1 — static)
@@ -73,7 +73,7 @@ def get_session_logger(session_id: str):
             result_dir="./logs",
             add_console_handler=True,
             verbose=False,
-            allowed_namespaces=("veris_chat", "app", "__main__"),
+            allowed_namespaces=("rag_core", "app", "__main__"),
             override=False,  # Append to existing log
         )
     return _session_loggers[session_id]

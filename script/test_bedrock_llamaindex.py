@@ -17,7 +17,7 @@ conda run -n veris_vectordb python script/test_bedrock_llamaindex.py
 import sys
 sys.path.insert(0, ".")
 
-from veris_chat.chat.config import load_config, get_bedrock_kwargs
+from rag_core.chat.config import load_config, get_bedrock_kwargs
 
 # Load configuration
 print("=" * 60)

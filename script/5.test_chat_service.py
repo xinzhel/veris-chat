@@ -28,7 +28,7 @@ import sys
 os.environ["AWS_REGION"] = "ap-southeast-2"
 
 sys.path.insert(0, ".")
-from veris_chat.utils.logger import setup_logging, print_timing_summary
+from rag_core.utils.logger import setup_logging, print_timing_summary
 
 # Setup logging
 logger = setup_logging(
@@ -36,12 +36,12 @@ logger = setup_logging(
     result_dir="./logs",
     add_console_handler=True,
     verbose=True,
-    allowed_namespaces=("veris_chat", "__main__"),
+    allowed_namespaces=("rag_core", "__main__"),
 )
 
 # Enable DEBUG level for service module to see memory content
 import logging
-logging.getLogger("veris_chat.chat.service").setLevel(logging.DEBUG)
+logging.getLogger("rag_core.chat.service").setLevel(logging.DEBUG)
 
 
 def log_print(msg: str):
@@ -69,7 +69,7 @@ log_print(f"  Test document URLs: {len(TEST_URLS)}")
 # Clear any cached resources from previous runs
 # -----------------------------------------------------------------------------
 log_print("\n[Cleanup] Clearing cached resources...")
-from veris_chat.chat.service import clear_cache
+from rag_core.chat.service import clear_cache
 clear_cache()
 log_print("  ✓ Cache cleared")
 
@@ -77,8 +77,8 @@ log_print("  ✓ Cache cleared")
 # Reset collection for clean test state
 # -----------------------------------------------------------------------------
 log_print("\n[Reset] Resetting Qdrant collection and session index...")
-from veris_chat.ingestion.main_client import IngestionClient
-from veris_chat.chat.config import load_config
+from rag_core.ingestion.main_client import IngestionClient
+from rag_core.chat.config import load_config
 config = load_config()
 models_cfg = config["models"]
 qdrant_cfg = config["qdrant"]
@@ -99,7 +99,7 @@ log_print(f"  Deleted PDFs: {reset_result['deleted_pdfs_count']}")
 # -----------------------------------------------------------------------------
 log_print("\n[1/4] Testing chat with document ingestion...")
 
-from veris_chat.chat.service import chat
+from rag_core.chat.service import chat
 
 try:
     response = chat(

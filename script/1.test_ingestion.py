@@ -12,8 +12,8 @@ import sys
 
 sys.path.insert(0, ".")
 
-from veris_chat.chat.config import load_config
-from veris_chat.utils.logger import setup_logging
+from rag_core.chat.config import load_config
+from rag_core.utils.logger import setup_logging
 
 # Setup logging with console output to see detailed operations
 setup_logging(
@@ -21,7 +21,7 @@ setup_logging(
     result_dir="./logs",
     add_console_handler=True,
     verbose=True,
-    allowed_namespaces=("veris_chat", "ingestion", "__main__"),
+    allowed_namespaces=("rag_core", "ingestion", "__main__"),
 )
 
 # Load configuration
@@ -47,7 +47,7 @@ print(f"  Chunk overlap: {chunking_cfg.get('overlap')}")
 # -----------------------------------------------------------------------------
 print("\n[1/6] Initializing IngestionClient...")
 
-from veris_chat.ingestion.main_client import IngestionClient
+from rag_core.ingestion.main_client import IngestionClient
 
 # Use a test collection to avoid polluting production data
 TEST_COLLECTION = "veris_pdfs_test"

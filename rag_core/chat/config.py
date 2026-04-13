@@ -1,5 +1,5 @@
 """
-Configuration loader for veris_chat.
+Configuration loader for rag_core.
 
 Loads config.yaml and .env, returning a dict with model names, Qdrant settings,
 and AWS credentials. Supports AWS SSO fallback when env vars are empty.

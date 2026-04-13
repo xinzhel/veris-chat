@@ -8,7 +8,7 @@ This module provides the main chat function that coordinates:
 4. Conversation memory via Mem0Memory
 
 Usage:
-    from veris_chat.chat.service import chat
+    from rag_core.chat.service import chat
     
     # Chat with document ingestion
     response = chat(
@@ -45,8 +45,8 @@ from llama_index.embeddings.bedrock import BedrockEmbedding
 from llama_index.llms.bedrock import Bedrock
 from llama_index.llms.bedrock_converse import BedrockConverse
 
-from veris_chat.chat.config import load_config, get_bedrock_kwargs
-from veris_chat.chat.retriever import (
+from rag_core.chat.config import load_config, get_bedrock_kwargs
+from rag_core.chat.retriever import (
     get_vector_index,
     get_url_filtered_retriever,
     retrieve_with_session_filter,
@@ -54,9 +54,9 @@ from veris_chat.chat.retriever import (
     get_session_memory,
     retrieve_nodes_metadata,
 )
-from veris_chat.ingestion.main_client import IngestionClient
-from veris_chat.utils.citation_query_engine import CitationQueryEngine, NoOpRetriever
-from veris_chat.utils.logger import print_timing_summary
+from rag_core.ingestion.main_client import IngestionClient
+from rag_core.utils.citation_query_engine import CitationQueryEngine, NoOpRetriever
+from rag_core.utils.logger import print_timing_summary
 
 logger = logging.getLogger(__name__)
 

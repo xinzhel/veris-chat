@@ -109,7 +109,7 @@ def parse_session_id(session_id: str) -> tuple[str, str]:
 
 ### 1. `KGClient` — Neo4j Knowledge Graph Client
 
-New module: `veris_chat/kg/client.py`
+New module: `rag_core/kg/client.py`
 
 Wraps the Neo4j Python driver. Connection via bolt protocol (SSH tunnel for local dev, direct on EC2).
 
@@ -151,7 +151,7 @@ class KGClient:
 
 ### 2. `format_parcel_context()` — System Message Builder
 
-New function in `veris_chat/kg/context.py`
+New function in `rag_core/kg/context.py`
 
 ```python
 def format_parcel_context(parcel_id: str, kg_context: dict) -> str:
