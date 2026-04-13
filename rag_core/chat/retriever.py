@@ -556,15 +556,17 @@ def get_session_memory(
     # Mem0 config structure for local or cloud Qdrant
     if qdrant_url:
         logger.info(f"[MEMORY] Using Qdrant cloud for memory: {qdrant_url}")
+        mem0_qdrant_config = {
+            "url": qdrant_url,
+            "api_key": qdrant_api_key,
+            "collection_name": f"mem0_memory_{session_id.replace('::', '_')}",
+            "embedding_model_dims": 1024,
+        }
+        
         mem0_config = {
             "vector_store": {
                 "provider": "qdrant",
-                "config": {
-                    "url": qdrant_url,
-                    "api_key": qdrant_api_key,
-                    "collection_name": f"mem0_memory_{session_id}",
-                    "embedding_model_dims": 1024,
-                },
+                "config": mem0_qdrant_config,
             },
             "embedder": {
                 "provider": "aws_bedrock",
@@ -588,7 +590,7 @@ def get_session_memory(
                 "provider": "qdrant",
                 "config": {
                     "path": "./qdrant_local",
-                    "collection_name": f"mem0_memory_{session_id}",
+                    "collection_name": f"mem0_memory_{session_id.replace('::', '_')}",
                     "embedding_model_dims": 1024,
                 },
             },
@@ -610,6 +612,22 @@ def get_session_memory(
     
     # Context uses session_id as user_id for session isolation
     context = {"user_id": session_id}
+    
+    # For tunnel mode: create our own tunnel-aware Qdrant client and pass to Mem0
+    use_tunnel = qdrant_url and os.getenv("QDRANT_TUNNEL", "").lower() in ("true", "1", "yes")
+    if use_tunnel:
+        from urllib.parse import urlparse, urlunparse
+        from qdrant_client import QdrantClient as QC
+        parsed = urlparse(qdrant_url)
+        original_host = parsed.hostname
+        tunnel_url = urlunparse(parsed._replace(netloc=f"localhost:{parsed.port or 6333}"))
+        tunnel_client = QC(url=tunnel_url, api_key=qdrant_api_key, verify=False)
+        tunnel_client._client.openapi_client.client._client.headers["Host"] = original_host
+        mem0_qdrant_config["client"] = tunnel_client
+        # Remove url/api_key since we're passing client directly
+        mem0_qdrant_config.pop("url", None)
+        mem0_qdrant_config.pop("api_key", None)
+        logger.info(f"[MEMORY] Using pre-built tunnel Qdrant client for Mem0")
     
     memory = Mem0Memory.from_config(
         context=context,

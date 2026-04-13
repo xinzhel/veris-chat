@@ -359,6 +359,7 @@ async def delete_session(session_id: str, clear_parcel_cache: bool = False):
     logger.info(f"[{timestamp}] DELETE /chat/sessions/{session_id}")
     
     cleaned = {"session_index": False, "memory": False, "parcel_cache": False}
+    qdrant_client_ref = None  # Share Qdrant connection between steps
     
     # 1. Remove from session_index
     try:
@@ -377,6 +378,7 @@ async def delete_session(session_id: str, clear_parcel_cache: bool = False):
             chunk_size=chunking_cfg.get("chunk_size", 500),
             chunk_overlap=chunking_cfg.get("overlap", 50),
         )
+        qdrant_client_ref = client.qdrant  # Save for step 2
         if session_id in client.session_index:
             del client.session_index[session_id]
             client._save_session_index()
@@ -385,14 +387,20 @@ async def delete_session(session_id: str, clear_parcel_cache: bool = False):
     except Exception as e:
         logger.warning(f"[{timestamp}] Failed to clean session_index: {e}")
     
-    # 2. Delete Mem0 memory collection
+    # 2. Delete Mem0 memory collection directly via Qdrant
+    # Reuse IngestionClient's Qdrant connection (already tunnel-aware)
     try:
-        from rag_core.chat.retriever import get_session_memory
-        import os
-        os.environ.setdefault("AWS_REGION", "us-east-1")
-        memory = get_session_memory(session_id)
-        memory.reset(reset_mem0=True)
-        cleaned["memory"] = True
+        memory_collection = f"mem0_memory_{session_id.replace('::', '_')}"
+        if qdrant_client_ref is None:
+            from rag_core.chat.retriever import get_qdrant_client
+            qdrant_client_ref = get_qdrant_client()
+        collections = [c.name for c in qdrant_client_ref.get_collections().collections]
+        if memory_collection in collections:
+            qdrant_client_ref.delete_collection(memory_collection)
+            cleaned["memory"] = True
+            logger.info(f"[{timestamp}] Deleted memory collection: {memory_collection}")
+        else:
+            logger.info(f"[{timestamp}] Memory collection not found: {memory_collection}")
         logger.info(f"[{timestamp}] Deleted memory for session")
     except Exception as e:
         logger.warning(f"[{timestamp}] Failed to clean memory: {e}")
