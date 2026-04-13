@@ -78,7 +78,7 @@ class KGClient:
 
     def get_parcel_context(self, parcel_id: str) -> Dict[str, List[Dict[str, Any]]]:
         """
-        Get all 7 assessment connection types for a parcel.
+        Get all 7 assessment connection types for a parcel in a single query.
 
         Returns dict with keys: audits, licences, prsa, psr, vlr, overlays, business_listings.
         Each value is a list of dicts. Empty list means confirmed absence (queried but no data).
@@ -89,18 +89,45 @@ class KGClient:
         Returns:
             Dict with 7 keys, each mapping to a list of assessment dicts.
         """
-        context = {
-            "audits": self._query_by_label(parcel_id, "EnvironmentalAudit"),
-            "licences": self._query_by_label(parcel_id, "EPALicence"),
-            "prsa": self._query_by_label(parcel_id, "PreliminaryRiskScreeningAssessment"),
-            "psr": self._query_by_label(parcel_id, "PrioritySiteRegister"),
-            "vlr": self._query_by_label(parcel_id, "LandfillRegister"),
-            "overlays": self._query_by_label(parcel_id, "Overlay"),
-            "business_listings": self._query_by_label(parcel_id, "HistoricalBusinessListing"),
+        # Single query for all assessment types (inspired by Oz's ALL_DETAILS_QUERY)
+        query = """
+            MATCH (p:Parcel)-[rel:hasOnsiteAssessment|hasOffsiteAssessment]->(a:Resource)
+            WHERE $pfi IN p.hasPFI
+            RETURN type(rel) AS rel_type,
+                   [l IN labels(a) WHERE l <> 'Resource'][0] AS category,
+                   properties(a) AS props
+        """
+        
+        # Label → context key mapping
+        label_map = {
+            "EnvironmentalAudit": "audits",
+            "EPALicence": "licences",
+            "PreliminaryRiskScreeningAssessment": "prsa",
+            "PrioritySiteRegister": "psr",
+            "LandfillRegister": "vlr",
+            "Overlay": "overlays",
+            "HistoricalBusinessListing": "business_listings",
         }
+        
+        # Initialize all 7 keys with empty lists
+        context: Dict[str, List[Dict[str, Any]]] = {v: [] for v in label_map.values()}
+        
+        with self._driver.session() as session:
+            for record in session.run(query, pfi=parcel_id):
+                category = record["category"]
+                key = label_map.get(category)
+                if key is None:
+                    continue  # Skip unknown types (Geometry, etc.)
+                
+                props = record["props"]
+                entry = {"relationship": record["rel_type"]}
+                for k, v in props.items():
+                    if k != "uri":
+                        entry[k] = _unpack(v)
+                context[key].append(entry)
 
         total = sum(len(v) for v in context.values())
-        logger.info(f"[KG] get_parcel_context({parcel_id}): {total} assessments across 7 types")
+        logger.info(f"[KG] get_parcel_context({parcel_id}): {total} assessments across 7 types (single query)")
         return context
 
     def _query_by_label(
