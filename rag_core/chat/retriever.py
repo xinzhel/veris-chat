@@ -577,7 +577,7 @@ def get_session_memory(
             "llm": {
                 "provider": "aws_bedrock",
                 "config": {
-                    "model": config["models"].get("memory_llm", "anthropic.claude-3-5-sonnet-20241022-v2:0"),
+                    "model": config["models"].get("memory_llm", "us.anthropic.claude-opus-4-6-v1"),
                     "temperature": 0.1,
                     "max_tokens": 2000,
                 },
@@ -603,7 +603,7 @@ def get_session_memory(
             "llm": {
                 "provider": "aws_bedrock",
                 "config": {
-                    "model": config["models"].get("memory_llm", "anthropic.claude-3-5-sonnet-20241022-v2:0"),
+                    "model": config["models"].get("memory_llm", "us.anthropic.claude-opus-4-6-v1"),
                     "temperature": 0.1,
                     "max_tokens": 2000,
                 },

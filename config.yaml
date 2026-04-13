@@ -13,7 +13,7 @@ models:
   # NOTE: AWS_REGION must be set to us-east-1 in .env for Opus 4.6 access
   generation_model: "us.anthropic.claude-opus-4-6-v1"
   
-  memory_llm: "anthropic.claude-3-5-sonnet-20241022-v2:0"  # For Mem0 fact extraction (v2 supports ON_DEMAND in ap-southeast-2)
+  memory_llm: "us.anthropic.claude-opus-4-6-v1"  # For Mem0 fact extraction (Opus 4.6, us.* prefix for RMIT SCP)
   
   # BedrockConverse requires cross-region inference profile for Claude 3.5 Sonnet v2 in ap-southeast-2
   # Use "us." prefix to route through US regions where on-demand is supported

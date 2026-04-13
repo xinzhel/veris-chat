@@ -77,10 +77,13 @@ T7 = Final checkpoint
   - [x] Return appropriate HTTP response (200 on success, 404 if session not found)
   - _Requirements: 1.2, 1.3_
 
-- [ ] Task 7: Checkpoint — Ensure all components work end-to-end
-  - Ensure all tests pass, ask the user if questions arise.
-  - Verify: first message triggers KG lookup + ingestion, follow-up uses cache, DELETE cleans up session
-  - Test with a real parcel ID from the KG (e.g., `433375739::test123`)
+- [x] Task 7: Checkpoint — Ensure all components work end-to-end
+  - [x] First message triggers KG lookup + PDF ingestion + streaming generation (PFI 433375739)
+  - [x] Parcel context correctly passed to LLM (cited EPA licence A01 details)
+  - [x] Memory with `::` session IDs works (collection name uses `replace('::', '_')`)
+  - [x] DELETE endpoint cleans up session_index + memory collection
+  - [x] Parcel cache preserved by default on delete (correct behavior)
+  - [x] Fixed: `memory_llm` updated from EOL `anthropic.claude-3-5-sonnet-20241022-v2:0` to `us.anthropic.claude-opus-4-6-v1`
 
 ## Notes
 
