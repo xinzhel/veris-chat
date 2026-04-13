@@ -88,14 +88,13 @@ class IngestionClient:
         if qdrant_url:
             use_tunnel = os.getenv("QDRANT_TUNNEL", "").lower() in ("true", "1", "yes")
             if use_tunnel:
-                logger.info("[QDRANT] Connecting via SSH tunnel (localhost:6333)")
-                self.qdrant = QdrantClient(
-                    host="localhost",
-                    port=6333,
-                    api_key=qdrant_api_key,
-                    https=True,
-                    verify=False,
-                )
+                from urllib.parse import urlparse, urlunparse
+                parsed = urlparse(qdrant_url)
+                original_host = parsed.hostname
+                tunnel_url = urlunparse(parsed._replace(netloc=f"localhost:{parsed.port or 6333}"))
+                logger.info(f"[QDRANT] Connecting via SSH tunnel: {tunnel_url}")
+                self.qdrant = QdrantClient(url=tunnel_url, api_key=qdrant_api_key, verify=False)
+                self.qdrant._client.openapi_client.client._client.headers["Host"] = original_host
             else:
                 logger.info(f"[QDRANT] Using remote Qdrant instance at {qdrant_url}")
                 self.qdrant = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
