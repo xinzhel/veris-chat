@@ -69,12 +69,12 @@ T7 = Final checkpoint
   - [x] Keep `document_urls` in `ChatRequest` as optional for backward compatibility
   - _Requirements: 1.1, 2.1, 2.2, 3.1_
 
-- [ ] Task 6: Implement session cleanup endpoint
-  - [ ] Add `DELETE /chat/sessions/{session_id}` endpoint in `chat_api.py`
-  - [ ] Remove session from `session_index` (via `IngestionClient`)
-  - [ ] Delete Mem0 memory collection for the session
-  - [ ] Clear cached KG data for the parcel from `_parcel_cache`
-  - [ ] Return appropriate HTTP response (200 on success, 404 if session not found)
+- [x] Task 6: Implement session cleanup endpoint
+  - [x] Add `DELETE /chat/sessions/{session_id}` endpoint in `chat_api.py`
+  - [x] Remove session from `session_index` (via `IngestionClient`)
+  - [x] Delete Mem0 memory collection for the session
+  - [x] Clear cached KG data for the parcel from `_parcel_cache`
+  - [x] Return appropriate HTTP response (200 on success, 404 if session not found)
   - _Requirements: 1.2, 1.3_
 
 - [ ] Task 7: Checkpoint — Ensure all components work end-to-end

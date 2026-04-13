@@ -4,6 +4,7 @@ FastAPI endpoints for the Veris Chat service.
 Endpoints:
 - POST /chat/ - Synchronous chat with OpenAI-compatible response
 - POST /chat/stream/ - Async streaming chat with OpenAI-compatible SSE
+- DELETE /chat/sessions/{session_id} - Clean up session (memory, cache)
 - GET /health - Health check
 
 Start server:
@@ -22,6 +23,12 @@ curl -X POST http://localhost:8000/chat/stream/ -H "Content-Type: application/js
 
 # Backward compatible (no parcel, manual document_urls)
 curl -X POST http://localhost:8000/chat/ -H "Content-Type: application/json" -d '{"session_id": "test", "message": "Hello"}'
+
+# Session cleanup
+curl -X DELETE http://localhost:8000/chat/sessions/433375739::test1
+
+# Session cleanup with parcel cache clear
+curl -X DELETE "http://localhost:8000/chat/sessions/433375739::test1?clear_parcel_cache=true"
 """
 
 import os
@@ -334,6 +341,77 @@ async def chat_stream_endpoint(request: ChatRequest):
             "X-Accel-Buffering": "no",  # Disable nginx buffering
         },
     )
+
+
+@app.delete("/chat/sessions/{session_id}")
+async def delete_session(session_id: str, clear_parcel_cache: bool = False):
+    """
+    Clean up a parcel session: remove session index, memory, and cached KG data.
+    
+    Cleanup steps:
+    1. Remove session from IngestionClient's session_index
+    2. Delete Mem0 memory collection for the session
+    3. Clear cached KG data for the parcel from _parcel_cache
+    """
+    import logging
+    logger = logging.getLogger("app")
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    logger.info(f"[{timestamp}] DELETE /chat/sessions/{session_id}")
+    
+    cleaned = {"session_index": False, "memory": False, "parcel_cache": False}
+    
+    # 1. Remove from session_index
+    try:
+        from rag_core.chat.config import load_config
+        from rag_core.ingestion.main_client import IngestionClient
+        
+        config = load_config()
+        qdrant_cfg = config.get("qdrant", {})
+        models_cfg = config.get("models", {})
+        chunking_cfg = config.get("chunking", {})
+        
+        client = IngestionClient(
+            collection_name=qdrant_cfg.get("collection_name", "veris_pdfs"),
+            embedding_model=models_cfg.get("embedding_model", "cohere.embed-english-v3"),
+            embedding_dim=qdrant_cfg.get("vector_size", 1024),
+            chunk_size=chunking_cfg.get("chunk_size", 500),
+            chunk_overlap=chunking_cfg.get("overlap", 50),
+        )
+        if session_id in client.session_index:
+            del client.session_index[session_id]
+            client._save_session_index()
+            cleaned["session_index"] = True
+            logger.info(f"[{timestamp}] Removed session from session_index")
+    except Exception as e:
+        logger.warning(f"[{timestamp}] Failed to clean session_index: {e}")
+    
+    # 2. Delete Mem0 memory collection
+    try:
+        from rag_core.chat.retriever import get_session_memory
+        import os
+        os.environ.setdefault("AWS_REGION", "us-east-1")
+        memory = get_session_memory(session_id)
+        memory.reset(reset_mem0=True)
+        cleaned["memory"] = True
+        logger.info(f"[{timestamp}] Deleted memory for session")
+    except Exception as e:
+        logger.warning(f"[{timestamp}] Failed to clean memory: {e}")
+    
+    # 3. Optionally clear parcel cache (default: keep it for other sessions on same parcel)
+    if clear_parcel_cache:
+        try:
+            parcel_id, _ = parse_session_id(session_id)
+            if parcel_id in _parcel_cache:
+                del _parcel_cache[parcel_id]
+                cleaned["parcel_cache"] = True
+                logger.info(f"[{timestamp}] Cleared parcel cache for PFI {parcel_id}")
+        except ValueError:
+            pass  # Not a parcel session, no cache to clear
+    
+    if not any(cleaned.values()):
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    
+    return {"status": "cleaned", "session_id": session_id, "cleaned": cleaned}
 
 
 @app.get("/health")
