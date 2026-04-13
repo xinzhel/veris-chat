@@ -86,8 +86,19 @@ class IngestionClient:
         qdrant_url = os.getenv("QDRANT_URL")
         qdrant_api_key = os.getenv("QDRANT_API_KEY")
         if qdrant_url:
-            logger.info(f"[QDRANT] Using remote Qdrant instance at {qdrant_url}")
-            self.qdrant = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
+            use_tunnel = os.getenv("QDRANT_TUNNEL", "").lower() in ("true", "1", "yes")
+            if use_tunnel:
+                logger.info("[QDRANT] Connecting via SSH tunnel (localhost:6333)")
+                self.qdrant = QdrantClient(
+                    host="localhost",
+                    port=6333,
+                    api_key=qdrant_api_key,
+                    https=True,
+                    verify=False,
+                )
+            else:
+                logger.info(f"[QDRANT] Using remote Qdrant instance at {qdrant_url}")
+                self.qdrant = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
         else:
             logger.info("[QDRANT] Using local Qdrant (embedded) storage.")
             self.qdrant = QdrantClient(path=str(self.storage_path))

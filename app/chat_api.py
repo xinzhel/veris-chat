@@ -296,11 +296,11 @@ async def chat_stream_endpoint(request: ChatRequest):
         
         formatter = OpenAIStreamFormatter()
         
-        # Resolve parcel data from KG (if parcel session)
-        parcel_data = _resolve_parcel_data(request.session_id, logger)
-        document_urls = parcel_data["document_urls"] or request.document_urls
-        
         try:
+            # Resolve parcel data from KG (if parcel session)
+            parcel_data = _resolve_parcel_data(request.session_id, logger)
+            document_urls = parcel_data["document_urls"] or request.document_urls
+            
             async for chunk in async_chat(
                 session_id=request.session_id,
                 message=request.message,

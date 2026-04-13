@@ -77,6 +77,18 @@ def get_qdrant_client(
     qdrant_api_key = api_key or os.getenv("QDRANT_API_KEY")
     
     if qdrant_url:
+        # SSH tunnel mode: when QDRANT_TUNNEL=true, connect via localhost tunnel
+        # with SSL verification disabled (cert is for qdrant.io, not localhost)
+        use_tunnel = os.getenv("QDRANT_TUNNEL", "").lower() in ("true", "1", "yes")
+        if use_tunnel:
+            logger.info(f"[RETRIEVER] Connecting to Qdrant cloud via SSH tunnel (localhost:6333)")
+            return qdrant_client.QdrantClient(
+                host="localhost",
+                port=6333,
+                api_key=qdrant_api_key,
+                https=True,
+                verify=False,
+            )
         logger.info(f"[RETRIEVER] Connecting to Qdrant cloud at {qdrant_url}")
         return qdrant_client.QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
     logger.info(f"[RETRIEVER] Using local Qdrant storage at {storage_path}")
