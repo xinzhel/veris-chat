@@ -95,7 +95,13 @@ Expected improvement: similar to Option 3 but without data migration.
 
 ## Recommendation
 
-1. **Now**: Option 1 (single query) — free, easy code change
-2. **If still slow**: Option 3 (scalar PFI + index) — one-time migration, permanent fix
-3. **If budget allows**: Option 2 (upgrade instance) — complements other options
+1. **Now**: Option 1 (single query) — free, easy code change ✅ **DONE** (54s → 3.9s)
+2. ~~If still slow: Option 3 (scalar PFI + index)~~ — not needed after Option 1
+3. ~~If budget allows: Option 2 (upgrade instance)~~ — not needed after Option 1
 4. **For production**: Option 4 (pre-compute) — eliminates Neo4j from hot path entirely
+
+## Resolution
+
+Applied Option 1: single combined query. Benchmark: **54s → 3.9s** (14x faster).
+Inspired by Oz's `parcelReports.js` middleware which uses the same approach (2s on same-machine Neo4j).
+App-level parcel cache (`_parcel_cache` in `chat_api.py`) ensures subsequent messages are instant (0ms).

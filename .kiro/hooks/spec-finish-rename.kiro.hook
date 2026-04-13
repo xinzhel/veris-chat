@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Rename Finished Spec",
+  "description": "When the user says a spec is finished, rename the spec folder to prepend \"x-\" and append the current date (MMDD) after the creation date. For example, \"0316-minor-embedding-subpackage\" becomes \"x-0316-0320-minor-embedding-subpackage\".",
+  "version": "1",
+  "when": {
+    "type": "promptSubmit"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Check if the user's message indicates a spec is finished (e.g., \"spec is finished\", \"mark spec as done\", \"close the spec\"). If so, identify the spec folder path from context, then rename it by: (1) prepending \"x-\" if not already present, (2) inserting today's date as MMDD after the creation date in the folder name (e.g., \"0316-minor-foo\" → \"x-0316-0320-minor-foo\"). Use the current date from the system. Do NOT rename if the message is unrelated to finishing a spec."
+  }
+}
