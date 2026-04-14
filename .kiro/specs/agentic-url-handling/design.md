@@ -13,10 +13,18 @@ When a user says "summarize this PDF: https://xxx" or "what's in https://xxx", t
 ## Package Structure
 
 ```
-rag_core/       ← existing RAG pipeline (untouched)
+lits/                ← lits_llm package (extended, not forked)
+  lm/
+    async_bedrock.py    ← NEW: async + native tool use
+  components/policy/
+    native_tool_use.py  ← NEW: structured tool call policy
+  agents/chain/
+    native_react.py     ← NEW: async/streaming ReAct
+
+rag_core/            ← existing RAG pipeline (untouched)
   chat/
     service.py
-    retriever.py
+    retriever.py        ← add get_all_chunks_by_url()
     config.py
   ingestion/
     main_client.py
@@ -25,54 +33,43 @@ rag_core/       ← existing RAG pipeline (untouched)
     context.py
   utils/
 
-agent/          ← NEW: top-level, not inside rag_core
+react/               ← this project's ReAct integration
   __init__.py
-  tools.py      ← tool definitions (ingest_pdf, search_docs, get_all_chunks)
-  loop.py       ← ReAct tool-use loop with BedrockConverse
+  tools.py              BaseTool subclasses wrapping rag_core
+  loop.py               Thin wrapper around NativeReAct
 
-app/            ← application layer (chat_api.py)
+rag_app/             ← RAG endpoints (renamed from app/)
+  chat_api.py
+
+react_app/           ← ReAct endpoints (NEW)
+  chat_api.py
+
+main.py              ← FastAPI app, mounts both routers
 ```
 
-`agent/` is a top-level package that imports from `rag_core/` but `rag_core/` never imports from `agent/`.
+`react/` imports from `rag_core/` and `lits/`. `rag_core/` never imports from `react/` or `lits/`.
 
 ## Architecture
 
 ### Current Pipeline (unchanged)
 
 ```
-chat_api.py → service.chat() → fixed pipeline → response
+rag_app/chat_api.py → service.async_chat() → fixed pipeline → SSE stream
 ```
 
 ### New Agent Mode (parallel path)
 
 ```
-chat_api.py → agent.loop.agent_chat() → ReAct loop → response
+react_app/chat_api.py → react/loop.py → lits/NativeReAct → ReAct loop → SSE stream
 ```
 
-`chat_api.py` decides which path based on config or request parameter.
+Two independent routers mounted on the same FastAPI instance via `main.py`.
 
-## ReAct Loop (`agent/loop.py`)
+## ReAct Loop
 
-Uses Bedrock's native tool use API (not text-parsing like some frameworks). Opus 4.6 has strong tool use support.
+Implemented via `lits/NativeReAct`, which uses Bedrock's native tool use API (structured JSON tool calls, not text-parsing). See "LiTS Integration" section for full architecture.
 
-```python
-async def agent_chat(session_id, message, system_message, parcel_context, ...):
-    """ReAct tool-use loop with streaming final answer."""
-    messages = build_initial_messages(system_message, parcel_context, message)
-    
-    while True:
-        response = await llm.achat(messages, tools=tool_schemas)
-        
-        if response.has_tool_calls:
-            for tool_call in response.tool_calls:
-                result = execute_tool(tool_call, session_id)
-                messages.append(tool_result_message(result))
-        else:
-            # Final answer — stream it
-            async for chunk in llm.astream_chat(messages):
-                yield {"type": "token", "content": chunk.delta}
-            break
-```
+The loop uses `converse_stream()` for every LLM call. `contentBlockStart` determines whether the response is a tool call or final answer — no need to wait for `stop_reason`.
 
 ## Tools (`agent/tools.py`)
 
@@ -82,9 +79,10 @@ Note: lits_llm has its own general LLM interface that includes BedrockConverse �
 
 | Tool | Description | Wraps | Source |
 |------|-------------|-------|--------|
-| `ingest_pdf` | Download + ingest a PDF URL into session | `IngestionClient.store(url, session_id)` | `rag_core/ingestion/main_client.py::IngestionClient.store` |
 | `search_documents` | Semantic search over session documents (top-K, needs embedding) | `retrieve_with_url_filter()` | `rag_core/chat/retriever.py::retrieve_with_url_filter` |
 | `get_all_chunks` | Get ALL chunks for a URL via payload filter (no embedding, for summarization) | Qdrant `scroll` with URL filter | To be added in `rag_core/chat/retriever.py` |
+
+Ingestion happens before the ReAct loop (same as existing RAG pipeline): `react_app/chat_api.py` resolves `document_urls` from KG, calls `IngestionClient.store()` for each, then enters the agent. LLM only queries already-ingested documents.
 
 Tools are thin wrappers around existing components. No duplication of ingestion/retrieval logic.
 
@@ -94,41 +92,48 @@ Each tool is a `BaseTool` subclass (`lits/tools/base.py`). Wrapping pattern:
 # react/tools.py
 from lits.tools.base import BaseTool
 from pydantic import BaseModel, Field
-from typing import Optional
 
-class IngestPDFInput(BaseModel):
-    url: str
+class SearchDocumentsInput(BaseModel):
+    query: str = Field(..., description="Semantic search query")
+    top_k: int = Field(5, description="Number of chunks to return")
 
-class IngestPDFTool(BaseTool):
-    name = "ingest_pdf"
-    description = "Download and ingest a PDF from URL into the session's document store"
-    args_schema = IngestPDFInput
+class SearchDocumentsTool(BaseTool):
+    name = "search_documents"
+    description = "Search session documents by semantic similarity. Returns top-K relevant chunks."
+    args_schema = SearchDocumentsInput
 
-    def __init__(self, ingestion_client: IngestionClient, session_id: str):
-        super().__init__(client=ingestion_client)
-        self.session_id = session_id
-
-    def _run(self, url: str) -> str:
-        result = self.client.store(url, session_id=self.session_id)
-        return f"Ingested {url} ({'cached' if result.get('skipped') else 'new'})"
+    def _run(self, query: str, top_k: int = 5) -> str:
+        results = retrieve_with_url_filter(self.index, query, self.urls, top_k)
+        return format_results(results)
 ```
 
-### Tool Schema Example (for Bedrock tool use API)
+### Tool Schema Example (for Bedrock Converse API)
 
 ```python
 tool_schemas = [
     {
-        "name": "ingest_pdf",
-        "description": "Download and ingest a PDF from URL into the session's document store",
+        "name": "search_documents",
+        "description": "Search session documents by semantic similarity. Returns top-K relevant chunks.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "url": {"type": "string", "description": "PDF URL to ingest"}
+                "query": {"type": "string", "description": "Semantic search query"},
+                "top_k": {"type": "integer", "description": "Number of chunks to return", "default": 5}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "get_all_chunks",
+        "description": "Get all chunks of a specific document by URL. Use for summarization.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Document URL to retrieve all chunks from"}
             },
             "required": ["url"]
         }
-    },
-    ...
+    }
 ]
 ```
 
@@ -176,16 +181,45 @@ Endpoints:
 - `POST /react/chat/stream/` → NativeReAct agent
 - `DELETE /react/sessions/{session_id}` → archive state, clean session_index
 
+### SSE Event Types
+
+ReAct streaming uses the same SSE format as the RAG pipeline, with one addition (`status`):
+
+| type | When | Content | Frontend handling |
+|------|------|---------|-------------------|
+| `status` | Agent is executing a tool call | Human-readable status, e.g. "Searching documents..." | Show as spinner/indicator, auto-dismiss when `token` starts |
+| `token` | Streaming final answer | Token text | Append to answer area |
+| `error` | Something failed | Error message | Show error |
+| `done` | Generation complete | Full answer + citations + timing | Finalize UI |
+
+```
+data: {"type": "status", "content": "Searching documents..."}
+data: {"type": "status", "content": "Reading the full document..."}
+data: {"type": "token", "content": "Based on "}
+data: {"type": "token", "content": "the assessment report..."}
+data: {"type": "done", "answer": "...", "citations": [...], "timing": {...}}
+```
+
+Tool name → status message mapping:
+
+```python
+STATUS_MAP = {
+    "search_documents": "Searching documents...",
+    "get_all_chunks": "Reading the full document...",
+}
+```
+
 ## What We Reuse from lits_llm
 
-1. **Tool interface pattern**: `BaseTool` with `name`, `description`, `args_schema`, `_run()`
-2. **PDFQueryTool concept**: URL + query → retrieve relevant chunks
-3. **Loop structure**: `while not answer: get_action → execute → append`
+1. **Tool interface**: `BaseTool` with `name`, `description`, `args_schema`, `_run()`
+2. **Components**: `Policy`, `Transition`, `ToolUseState`, `ToolUseStep` — extended with native tool use support
+3. **Agent**: `ChainAgent` checkpoint mechanism (state load/save via `query_idx` + `checkpoint_dir`)
+4. **Loop structure**: policy → transition → state append → repeat
 
-What we DON'T reuse:
-- LiTS framework (policy, transition, reward, state) — overkill for chat
-- Text-based action parsing — Bedrock has native tool use API
-- Evaluation/benchmarking infrastructure
+What we ADD to lits (all new files, zero changes to existing):
+- `AsyncBedrockChatModel` — async LM with native tool use + streaming
+- `NativeToolUsePolicy` — structured tool calls instead of text parsing
+- `NativeReAct` — async/streaming ReAct agent with `from_tools()` factory
 
 ## LiTS Integration
 
@@ -418,19 +452,24 @@ Zero changes to existing class behavior. All new code. Existing research pipelin
 ```python
 # react/loop.py — this project's ReAct integration
 from lits.agents.chain.native_react import NativeReAct
-from react.tools import IngestPDFTool, RetrieveTool
+from react.tools import SearchDocumentsTool, GetAllChunksTool
 
 async def react_chat(session_id, message, system_message, parcel_context, document_urls, ...):
     """Multi-turn ReAct chat with state persistence via lits checkpoint."""
     
-    # 1. Build tools (session-scoped)
+    # 1. Ingest documents BEFORE entering ReAct loop (same as RAG pipeline)
     ingestion_client = get_ingestion_client()
+    if document_urls:
+        for url in document_urls:
+            ingestion_client.store(url, session_id=session_id)
+    
+    # 2. Build tools (session-scoped, query only — no ingestion tool)
     tools = [
-        IngestPDFTool(ingestion_client, session_id),
-        RetrieveTool(ingestion_client, session_id),
+        SearchDocumentsTool(ingestion_client, session_id),
+        GetAllChunksTool(ingestion_client, session_id),
     ]
     
-    # 2. Create agent (system_message + parcel_context → system prompt)
+    # 3. Create agent (system_message + parcel_context → system prompt)
     agent = NativeReAct.from_tools(
         tools=tools,
         model_name="us.anthropic.claude-opus-4-6-v1",
@@ -438,7 +477,7 @@ async def react_chat(session_id, message, system_message, parcel_context, docume
         max_iter=10,
     )
     
-    # 3. Run ReAct loop with streaming
+    # 4. Run ReAct loop with streaming
     #    lits internally: load state from checkpoint → append user_message step
     #    → ReAct loop → save state to checkpoint
     async for chunk in agent.stream(
@@ -467,7 +506,8 @@ sequenceDiagram
 
     App->>Glue: react_chat(session_id, message, system_prompt, ...)
 
-    Glue->>Glue: Build tools (IngestPDFTool, RetrieveTool)
+    Note over Glue: Ingest document_urls via IngestionClient.store()<br/>(before ReAct loop, same as RAG pipeline)
+    Glue->>Glue: Build tools (SearchDocumentsTool, GetAllChunksTool)
     Glue->>Agent: NativeReAct.from_tools(tools, model, system_message)
     Glue->>Agent: agent.stream(message, query_idx=session_id, checkpoint_dir=...)
 
@@ -486,16 +526,19 @@ sequenceDiagram
         alt LLM returns tool_calls
             Policy-->>Agent: ToolUseStep(action, assistant_raw)
             Agent->>Tools: execute_tool_action(action)
-            Note right of Tools: Wraps rag_core/:<br/>IngestionClient.store()<br/>retrieve_with_url_filter()
+            Agent-->>Glue: yield {"type": "status", "content": "Searching..."}
+            Glue-->>App: yield SSE status
+            App-->>Client: data: {"type": "status", ...}
+            Note right of Tools: Wraps rag_core/:<br/>retrieve_with_url_filter()<br/>get_all_chunks_by_url()
             Tools-->>Agent: observation → update state
             Note over Agent: Back to get_actions
-        else LLM returns final answer
-            Policy-->>Agent: ToolUseStep(answer=text)
-            Agent->>LM: astream(messages)
+        else LLM returns final answer (streamed)
+            Note right of LM: stop_reason=end_turn, stream tokens directly
             LM-->>Agent: stream tokens
             Agent-->>Glue: yield token chunks
-            Glue-->>App: yield SSE chunks
-            App-->>Client: data: token chunks
+            Glue-->>App: yield token chunks
+            App->>App: formatter.format_sse(chunk)
+            App-->>Client: data: {"type": "token", ...}
         end
     end
 
@@ -504,32 +547,9 @@ sequenceDiagram
     App-->>Client: data: [DONE]
 ```
 
-### Package structure (updated)
+### Package structure
 
-```
-lits/                ← lits_llm package (extended, not forked)
-  lm/
-    async_bedrock.py    ← NEW: async + native tool use
-  components/policy/
-    native_tool_use.py  ← NEW: structured tool call policy
-  agents/chain/
-    native_react.py     ← NEW: async/streaming ReAct
-
-rag_core/            ← existing RAG pipeline (untouched)
-
-react/               ← this project's ReAct integration
-  __init__.py
-  tools.py              BaseTool subclasses wrapping rag_core
-  loop.py               Thin wrapper around NativeReAct + state persistence
-
-rag_app/             ← RAG endpoints (renamed from app/)
-  chat_api.py
-
-react_app/           ← ReAct endpoints (NEW)
-  chat_api.py
-
-main.py              ← FastAPI app, mounts both routers
-```
+See "Package Structure" section at the top of this document.
 
 ## Conversation History
 
@@ -568,21 +588,19 @@ ToolUseState = [
 
 ### NativeReAct 多轮调用
 
+每次HTTP请求调用 `agent.stream(message, query_idx=session_id, checkpoint_dir=...)`，lits 内部自动 load/save state：
+
 ```python
-# react/loop.py
-agent = NativeReAct.from_tools(tools=tools, model_name="us.anthropic.claude-opus-4-6-v1")
+# 第1轮请求：lits 发现没有 checkpoint，从空 state 开始
+# state: [user_step("Is this a priority site?"), tool_step, answer_step]
+# lits 自动 save 到 data/chat_state/{session_id}.json
 
-# 第1轮：state 从空开始
-state = agent.run("Is this a priority site?", state=None)
-# state 现在包含: [user_step, tool_step, answer_step]
-
-# 第2轮：传入上一轮的 state，继续 append
-state = agent.run("What audits were done?", state=state)
-# state 现在包含: [user_step, tool_step, answer_step, user_step2, answer_step2]
-
-# 持久化：直接用 TrajectoryState.save()
-state.save("data/chat_state/433375739__test1.json", query="session")
+# 第2轮请求：lits load checkpoint，在已有 state 上 append
+# state: [...第1轮..., user_step("What audits were done?"), answer_step]
+# lits 自动 save 更新后的 state
 ```
+
+调用方（`react/loop.py`）不需要手动管理 state 文件。
 
 ### Cleanup
 
@@ -674,8 +692,38 @@ lits内部。lits已有`ChainAgent`的checkpoint机制（`checkpoint_dir` + `que
 
 **Q: 为什么不把 `search_documents` 和 `get_all_chunks` 合成一个 `retrieve` tool？**
 
-两个操作本质不同：`search_documents` 是语义搜索（需要embedding计算），`get_all_chunks` 是payload filter（Qdrant `scroll`，不需要embedding，纯metadata查询）。合在一起需要LLM理解"传query走搜索，传url走全量"的隐式逻辑。三个独立tool各自职责单一，description清晰，LLM更容易正确调用。
+两个操作本质不同：`search_documents` 是语义搜索（需要embedding计算），`get_all_chunks` 是payload filter（Qdrant `scroll`，不需要embedding，纯metadata查询）。合在一起需要LLM理解"传query走搜索，传url走全量"的隐式逻辑。两个独立tool各自职责单一，description清晰，LLM更容易正确调用。
 
 **Q: lits自带的 `PDFQueryTool` 需要用吗？**
 
 不需要。`PDFQueryTool` 是 `ingest_pdf` + `search_documents` 合在一起（给URL+query → 下载+索引+搜索）。拆开更灵活——agent可以先ingest一次，然后多次search不同query，而`PDFQueryTool`每次都要传URL。
+
+
+**Q: `ingest_pdf` 需要作为 LLM tool 吗？**
+
+不需要。KG-resolved 的 `document_urls` 在进入 ReAct loop 之前就已经确定了，ingestion 在 `react_app/chat_api.py` 里完成（和现有 RAG pipeline 一样）。LLM 只负责查询已有文档。system message 里明确说明只处理内部文档，用户如果给了外部 URL，LLM 会告知无法处理。
+
+**Q: `get_all_chunks_by_url()` 写在哪里？**
+
+写在 `rag_core/chat/retriever.py` 里，和 `retrieve_with_url_filter()` 并列。一个是语义搜索（top-K，需要embedding），一个是全量获取（Qdrant `scroll`，payload filter，不需要embedding）。都是 retriever 层的职责。`GetAllChunksTool` 只是薄 wrapper 调用它。
+
+
+**Q: Agent 做 tool call 时要不要 stream 给前端？直接暴露技术细节不太友好？**
+
+不暴露技术细节。Agent 执行 tool call 时发 `{"type": "status"}` SSE event，内容是自然语言（如 "Searching documents..."、"Reading the full document..."），通过 `STATUS_MAP` 从 tool name 映射。前端显示为状态指示器（spinner + 文字），token 开始流之后自动消失。和现有 RAG pipeline 的 SSE 格式完全兼容，只是多了一个 `status` type。
+
+
+**Q: Final answer 的 streaming 怎么实现？需要两次 LLM 调用吗？**
+
+不需要。ReAct loop 里每次 LLM 调用都用 streaming 模式（`astream`）。当 `stop_reason=end_turn`（不是 tool call）时，tokens 直接流式 yield 给前端——这就是 final answer，不需要第二次调用。之前 diagram 的错误是画成"先拿到完整 answer，再用 astream 重新生成一遍做 streaming"，等于让 LLM 回答两次，已修正。
+
+注意：tool call 的 response 也是一次完整返回（Bedrock Converse API 不会分 chunk 返回 tool call），只有 final answer 需要 streaming。所以 loop 里的逻辑是：每次调用都 stream → 如果收到 tool_use block 就收集完整 response 后执行 tool → 如果收到 text 就逐 token yield。
+
+**Q: `converse_stream()` 怎么区分 tool call 和 final answer？`stop_reason` 不是最后才到吗？**
+
+不需要等 `stop_reason`。`converse_stream()` 的第一个 event `contentBlockStart` 就能区分：
+
+- `contentBlockStart: {"toolUse": {"name": "search_documents"}}` → tool call，收集完整 tool call 后执行
+- `contentBlockStart: {}` → text block，立刻开始逐 token yield 给前端
+
+后续的 `contentBlockDelta` 逐个到达（text tokens 或 tool input JSON fragments），`messageStop: {"stopReason": "end_turn"}` 在最后才到，但不影响 streaming 决策。第一个 `contentBlockStart` 就够了。
