@@ -83,7 +83,8 @@ Note: lits_llm has its own general LLM interface that includes BedrockConverse �
 | Tool | Description | Wraps | Source |
 |------|-------------|-------|--------|
 | `ingest_pdf` | Download + ingest a PDF URL into session | `IngestionClient.store(url, session_id)` | `rag_core/ingestion/main_client.py::IngestionClient.store` |
-| `retrieve` | Retrieve document chunks — semantic search (pass `query`) or get all chunks of a URL (pass `url`) | `retrieve_with_url_filter()` + new scroll-all | `rag_core/chat/retriever.py::retrieve_with_url_filter` + new `get_all_chunks_by_url()` |
+| `search_documents` | Semantic search over session documents (top-K, needs embedding) | `retrieve_with_url_filter()` | `rag_core/chat/retriever.py::retrieve_with_url_filter` |
+| `get_all_chunks` | Get ALL chunks for a URL via payload filter (no embedding, for summarization) | Qdrant `scroll` with URL filter | To be added in `rag_core/chat/retriever.py` |
 
 Tools are thin wrappers around existing components. No duplication of ingestion/retrieval logic.
 
@@ -110,24 +111,6 @@ class IngestPDFTool(BaseTool):
     def _run(self, url: str) -> str:
         result = self.client.store(url, session_id=self.session_id)
         return f"Ingested {url} ({'cached' if result.get('skipped') else 'new'})"
-
-class RetrieveInput(BaseModel):
-    query: Optional[str] = Field(None, description="Semantic search query")
-    url: Optional[str] = Field(None, description="URL to get all chunks from (for summarization)")
-    top_k: int = Field(5, description="Number of chunks to return (only for query mode)")
-
-class RetrieveTool(BaseTool):
-    name = "retrieve"
-    description = "Retrieve document chunks. Pass query for semantic search, or url to get all chunks of a specific document for summarization."
-    args_schema = RetrieveInput
-
-    def _run(self, query: str = None, url: str = None, top_k: int = 5) -> str:
-        if url and not query:
-            return self._get_all_chunks(url)
-        elif query:
-            return self._search(query, top_k)
-        else:
-            return "Error: provide either query or url"
 ```
 
 ### Tool Schema Example (for Bedrock tool use API)
@@ -435,11 +418,10 @@ Zero changes to existing class behavior. All new code. Existing research pipelin
 ```python
 # react/loop.py — this project's ReAct integration
 from lits.agents.chain.native_react import NativeReAct
-from lits.tools.base import BaseTool
 from react.tools import IngestPDFTool, RetrieveTool
 
 async def react_chat(session_id, message, system_message, parcel_context, document_urls, ...):
-    """Multi-turn ReAct chat with state persistence."""
+    """Multi-turn ReAct chat with state persistence via lits checkpoint."""
     
     # 1. Build tools (session-scoped)
     ingestion_client = get_ingestion_client()
@@ -448,24 +430,23 @@ async def react_chat(session_id, message, system_message, parcel_context, docume
         RetrieveTool(ingestion_client, session_id),
     ]
     
-    # 2. Create agent
+    # 2. Create agent (system_message + parcel_context → system prompt)
     agent = NativeReAct.from_tools(
         tools=tools,
         model_name="us.anthropic.claude-opus-4-6-v1",
-        system_message=system_message,
+        system_message=system_message + "\n\n" + parcel_context,
         max_iter=10,
     )
     
-    # 3. Load existing state (multi-turn: state persists across requests)
-    state_path = f"data/chat_state/{session_id.replace('::', '__')}.json"
-    state = ToolUseState.load(state_path) if Path(state_path).exists() else None
-    
-    # 4. Run ReAct loop with streaming
-    async for chunk in agent.stream(message, state=state, parcel_context=parcel_context):
+    # 3. Run ReAct loop with streaming
+    #    lits internally: load state from checkpoint → append user_message step
+    #    → ReAct loop → save state to checkpoint
+    async for chunk in agent.stream(
+        message,
+        query_idx=session_id,
+        checkpoint_dir="data/chat_state/",
+    ):
         yield chunk
-    
-    # 5. Save updated state (includes all history + current turn)
-    agent.state.save(state_path, query="session")
 ```
 
 ### Call flow diagram
@@ -473,58 +454,54 @@ async def react_chat(session_id, message, system_message, parcel_context, docume
 ```mermaid
 sequenceDiagram
     participant Client
-    participant ReactApp as react_app/chat_api.py
+    participant App as react_app/chat_api.py
     participant Glue as react/loop.py
     participant Agent as lits/NativeReAct
     participant Policy as lits/NativeToolUsePolicy
     participant LM as lits/AsyncBedrockChatModel
-    participant Transition as lits/ToolUseTransition
-    participant Tools as react/tools.py
-    participant RagCore as rag_core/
+    participant Tools as react/tools.py → rag_core/
 
-    Client->>ReactApp: POST /react/chat/stream/
-    ReactApp->>ReactApp: _resolve_parcel_data(session_id)
-    ReactApp->>Glue: react_chat(session_id, message, ...)
+    Client->>App: POST /react/chat/stream/
+
+    Note over App: System prompt construction:<br/>1. get_parcel_context(parcel_id) via rag_core/kg/<br/>2. system_prompt = APP_SYSTEM_MESSAGE + parcel_context
+
+    App->>Glue: react_chat(session_id, message, system_prompt, ...)
 
     Glue->>Glue: Build tools (IngestPDFTool, RetrieveTool)
-    Glue->>Agent: NativeReAct.from_tools(tools, model_name)
-    Glue->>Glue: Load state from JSON (if exists)
-    Glue->>Agent: agent.stream(message, state)
+    Glue->>Agent: NativeReAct.from_tools(tools, model, system_message)
+    Glue->>Agent: agent.stream(message, query_idx=session_id, checkpoint_dir=...)
 
+    Note over Agent: Load state from checkpoint (if exists)
     Note over Agent: Append ToolUseStep(user_message) to state
 
     rect rgba(128, 128, 128, 0.1)
-        Note over Agent,RagCore: ReAct iteration (repeats until final answer or max_iter)
+        Note over Agent,Tools: ReAct iteration (repeats until final answer or max_iter)
         Agent->>Policy: get_actions(state, query)
         Policy->>Policy: _build_messages(query, state)
-        Note right of Policy: history + current turn from state
+        Note right of Policy: → system_prompt + history + current turn
         Policy->>LM: __call__(messages, tools=tool_schemas)
-        LM->>LM: Bedrock Converse API (native tool use)
+        Note right of LM: Bedrock Converse API<br/>(native tool use)
         LM-->>Policy: ToolCallOutput(tool_calls, raw_message)
 
         alt LLM returns tool_calls
             Policy-->>Agent: ToolUseStep(action, assistant_raw)
-            Agent->>Transition: step(state, tool_step)
-            Transition->>Tools: execute_tool_action(action)
-            Tools->>RagCore: IngestionClient.store() or retrieve()
-            RagCore-->>Tools: result
-            Tools-->>Transition: observation string
-            Note right of Transition: step.observation = result
-            Transition-->>Agent: updated state
-            Note over Agent: Back to get_actions with updated state
+            Agent->>Tools: execute_tool_action(action)
+            Note right of Tools: Wraps rag_core/:<br/>IngestionClient.store()<br/>retrieve_with_url_filter()
+            Tools-->>Agent: observation → update state
+            Note over Agent: Back to get_actions
         else LLM returns final answer
             Policy-->>Agent: ToolUseStep(answer=text)
             Agent->>LM: astream(messages)
             LM-->>Agent: stream tokens
             Agent-->>Glue: yield token chunks
-            Glue-->>ReactApp: yield SSE chunks
-            ReactApp-->>Client: data: token chunks
+            Glue-->>App: yield SSE chunks
+            App-->>Client: data: token chunks
         end
     end
 
-    Glue->>Glue: state.save(state_path)
-    Glue-->>ReactApp: yield done chunk
-    ReactApp-->>Client: data: [DONE]
+    Note over Agent: Save state to checkpoint
+    Glue-->>App: yield done chunk
+    App-->>Client: data: [DONE]
 ```
 
 ### Package structure (updated)
@@ -676,6 +653,10 @@ Python的sync/async是根本性的分裂——`__call__`不能同时是sync和as
 
 具体做法：多轮对话不重置state，每轮的user message、tool calls、final answer都作为ToolUseStep append到同一个state。`TrajectoryState.save()`/`load()`自动序列化整个对话历史，checkpoint恢复就恢复了完整对话。不需要外部的ChatHistory class或单独的JSON文件。
 
+**Q: state的load/save应该在lits内部还是外部（react/loop.py）管理？**
+
+lits内部。lits已有`ChainAgent`的checkpoint机制（`checkpoint_dir` + `query_idx`）。`query_idx`概念上和`session_id`一样——都是定位一个state文件。`NativeReAct`复用这个机制：调用方传`query_idx=session_id`和`checkpoint_dir`，lits内部自动load → run → save。`react/loop.py`不需要手动管理state文件。
+
 **Q: `Policy._call_model`没有`tools`参数，怎么传tool schemas给LLM？**
 
 `Policy._call_model`签名是`def _call_model(self, prompt, **kwargs)`，`**kwargs`透传给`self.base_model()`。所以`_call_model(messages, tools=self.tool_schemas)`会变成`self.base_model(messages, role=role, tools=self.tool_schemas)`。不需要override `_call_model`，只需要`AsyncBedrockChatModel.__call__`接受`tools`参数。
@@ -689,3 +670,12 @@ Python的sync/async是根本性的分裂——`__call__`不能同时是sync和as
 不应该放在ToolUseStep里。`ToolUseStep`是structures层的数据结构，应该是provider-agnostic的，只存数据（action, observation, answer, assistant_raw），不知道怎么格式化成某个API的message格式。
 
 不同LLM的tool result格式不一样：Bedrock用`{"toolResult": {"toolUseId": ...}}`，OpenAI用`{"role": "tool", "tool_call_id": ...}`，Anthropic直接API用`{"type": "tool_result", "tool_use_id": ...}`。所以构建逻辑是provider-specific的，放在LM层——每个LM class提供`format_tool_result(tool_use_id, observation)`方法。Policy调用`self.base_model.format_tool_result()`，换provider只需要换LM class，Policy代码不动。
+
+
+**Q: 为什么不把 `search_documents` 和 `get_all_chunks` 合成一个 `retrieve` tool？**
+
+两个操作本质不同：`search_documents` 是语义搜索（需要embedding计算），`get_all_chunks` 是payload filter（Qdrant `scroll`，不需要embedding，纯metadata查询）。合在一起需要LLM理解"传query走搜索，传url走全量"的隐式逻辑。三个独立tool各自职责单一，description清晰，LLM更容易正确调用。
+
+**Q: lits自带的 `PDFQueryTool` 需要用吗？**
+
+不需要。`PDFQueryTool` 是 `ingest_pdf` + `search_documents` 合在一起（给URL+query → 下载+索引+搜索）。拆开更灵活——agent可以先ingest一次，然后多次search不同query，而`PDFQueryTool`每次都要传URL。
