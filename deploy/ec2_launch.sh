@@ -1,7 +1,8 @@
 #!/bin/bash
 # EC2 Launch Script for Veris-Chat
 # Usage: 
-#   bash deploy/ec2_launch.sh           # Launch EC2 instance
+#   bash deploy/ec2_launch.sh           # Launch EC2 instance with Elastic IP
+#   bash deploy/ec2_launch.sh --no-eip  # Launch without Elastic IP (for parallel testing)
 #   bash deploy/ec2_launch.sh --add-ip  # Add local IP to security group
 #   bash deploy/ec2_launch.sh --terminate  # Terminate veris-chat instance
 #
@@ -59,6 +60,14 @@ if [ "$1" == "--terminate" ]; then
     exit 0
 fi
 
+# Check for --no-eip flag
+SKIP_EIP=false
+for arg in "$@"; do
+    if [ "$arg" == "--no-eip" ]; then
+        SKIP_EIP=true
+    fi
+done
+
 # Check environment variables
 if [ -z "$GIT_TOKEN" ] || [ -z "$QDRANT_URL" ] || [ -z "$QDRANT_API_KEY" ]; then
     echo "Error: Missing environment variables. Run: source ~/.zshrc"
@@ -80,7 +89,7 @@ INSTANCE_ID=$(aws ec2 run-instances \
   --iam-instance-profile Name=$INSTANCE_PROFILE \
   --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
   --user-data file:///tmp/user_data.sh \
-  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=veris-chat}]' \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=veris-chat-v2}]' \
   --query 'Instances[0].InstanceId' --output text)
 
 echo "Instance ID: $INSTANCE_ID"
@@ -92,19 +101,38 @@ rm /tmp/user_data.sh
 echo "Waiting for instance to be running..."
 aws ec2 wait instance-running --region $REGION --instance-ids $INSTANCE_ID
 
-# Attach Elastic IP
-echo "Attaching Elastic IP $ELASTIC_IP..."
-aws ec2 associate-address --region $REGION --instance-id $INSTANCE_ID --allocation-id $ELASTIC_IP_ALLOC
-
-echo ""
-echo "=== Launch Complete ==="
-echo "Instance ID: $INSTANCE_ID"
-echo "Elastic IP: $ELASTIC_IP"
-echo ""
-echo "User-data setup takes ~5-10 minutes. Monitor with:"
-echo "  ssh-keygen -R $ELASTIC_IP"
-echo "  ssh -i ~/.ssh/race_lits_server.pem ec2-user@$ELASTIC_IP"
-echo "  sudo tail -f /var/log/user-data.log"
-echo ""
-echo "Test API:"
-echo "  curl http://$ELASTIC_IP:8000/health"
+# Attach Elastic IP (unless --no-eip)
+if [ "$SKIP_EIP" == "true" ]; then
+    PUBLIC_IP=$(aws ec2 describe-instances --region $REGION --instance-ids $INSTANCE_ID \
+        --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+    echo ""
+    echo "=== Launch Complete (no EIP) ==="
+    echo "Instance ID: $INSTANCE_ID"
+    echo "Public IP: $PUBLIC_IP"
+    echo ""
+    echo "User-data setup takes ~5-10 minutes. Monitor with:"
+    echo "  ssh-keygen -R $PUBLIC_IP"
+    echo "  ssh -i ~/.ssh/race_lits_server.pem ec2-user@$PUBLIC_IP"
+    echo "  sudo tail -f /var/log/user-data.log"
+    echo ""
+    echo "Test API:"
+    echo "  curl http://$PUBLIC_IP:8000/health"
+    echo ""
+    echo "To attach Elastic IP later:"
+    echo "  aws ec2 associate-address --region $REGION --instance-id $INSTANCE_ID --allocation-id $ELASTIC_IP_ALLOC"
+else
+    echo "Attaching Elastic IP $ELASTIC_IP..."
+    aws ec2 associate-address --region $REGION --instance-id $INSTANCE_ID --allocation-id $ELASTIC_IP_ALLOC
+    echo ""
+    echo "=== Launch Complete ==="
+    echo "Instance ID: $INSTANCE_ID"
+    echo "Elastic IP: $ELASTIC_IP"
+    echo ""
+    echo "User-data setup takes ~5-10 minutes. Monitor with:"
+    echo "  ssh-keygen -R $ELASTIC_IP"
+    echo "  ssh -i ~/.ssh/race_lits_server.pem ec2-user@$ELASTIC_IP"
+    echo "  sudo tail -f /var/log/user-data.log"
+    echo ""
+    echo "Test API:"
+    echo "  curl http://$ELASTIC_IP:8000/health"
+fi
