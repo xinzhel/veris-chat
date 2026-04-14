@@ -75,6 +75,7 @@ def load_config(
         "logging": yaml_config.get("logging", {}),
         "chunking": yaml_config.get("chunking", {}),
         "paths": yaml_config.get("paths", {}),
+        "neo4j": yaml_config.get("neo4j", {}),
     }
 
     return config

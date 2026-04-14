@@ -95,6 +95,7 @@ echo "=== Veris-Chat EC2 Setup Started ==="
 GIT_TOKEN="${GIT_TOKEN}"
 QDRANT_URL="${QDRANT_URL}"
 QDRANT_API_KEY="${QDRANT_API_KEY}"
+NEO4J_URI="${NEO4J_URI}"
 
 APP_DIR="/home/ec2-user/veris-chat"
 REPO_URL="https://${GIT_TOKEN}@github.com/AEA-MapTalk/veris-chat.git"
@@ -136,7 +137,8 @@ EOF
 chown ec2-user:ec2-user ${APP_DIR}/.env
 
 echo "=== Configuring Neo4j connection for EC2 ==="
-sed -i 's|bolt://localhost:7687|bolt://54.253.127.203:7687|' ${APP_DIR}/config.yaml
+# NEO4J_URI is passed via envsubst from the launch script
+sed -i "s|bolt://localhost:7687|${NEO4J_URI}|" ${APP_DIR}/config.yaml
 
 echo "=== Installing Python dependencies ==="
 cd ${APP_DIR}

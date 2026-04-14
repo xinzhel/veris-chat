@@ -100,9 +100,11 @@ T7 = Update README
   - [x] 6.2 Add GitHub repo secrets at https://github.com/AEA-MapTalk/veris-chat/settings/secrets/actions
     - `EC2_HOST`: `54.66.111.21`
     - `EC2_SSH_KEY`: contents of `~/.ssh/race_lits_server.pem`
+    - `NEO4J_HOST`: KG EC2 private IP (currently `172.31.13.31`)
     ```bash
     gh secret set EC2_HOST --repo AEA-MapTalk/veris-chat --body "54.66.111.21"
     gh secret set EC2_SSH_KEY --repo AEA-MapTalk/veris-chat < ~/.ssh/race_lits_server.pem
+    gh secret set NEO4J_HOST --repo AEA-MapTalk/veris-chat --body "172.31.13.31"
     ```
   - [x] 6.3 Document limitations (see Notes below)
 

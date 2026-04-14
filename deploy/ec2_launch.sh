@@ -69,14 +69,14 @@ for arg in "$@"; do
 done
 
 # Check environment variables
-if [ -z "$GIT_TOKEN" ] || [ -z "$QDRANT_URL" ] || [ -z "$QDRANT_API_KEY" ]; then
-    echo "Error: Missing environment variables. Run: source ~/.zshrc"
+if [ -z "$GIT_TOKEN" ] || [ -z "$QDRANT_URL" ] || [ -z "$QDRANT_API_KEY" ] || [ -z "$NEO4J_URI" ]; then
+    echo "Error: Missing environment variables. Set GIT_TOKEN, QDRANT_URL, QDRANT_API_KEY, NEO4J_URI in ~/.zshrc"
     exit 1
 fi
 
 # Generate user-data with secrets substituted
 echo "Generating user-data with secrets..."
-envsubst '${GIT_TOKEN} ${QDRANT_URL} ${QDRANT_API_KEY}' < deploy/user_data.sh > /tmp/user_data.sh
+envsubst '${GIT_TOKEN} ${QDRANT_URL} ${QDRANT_API_KEY} ${NEO4J_URI}' < deploy/user_data.sh > /tmp/user_data.sh
 
 # Launch EC2 instance
 echo "Launching EC2 instance..."

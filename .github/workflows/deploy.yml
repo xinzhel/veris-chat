@@ -22,8 +22,8 @@ jobs:
             git fetch origin deploy-clean
             git reset --hard origin/deploy-clean
 
-            # Update Neo4j URI for EC2 (local config uses localhost)
-            sed -i 's|bolt://localhost:7687|bolt://54.253.127.203:7687|' config.yaml
+            # Update Neo4j URI for EC2 (use KG private IP within same VPC)
+            sed -i 's|bolt://localhost:7687|bolt://${{ secrets.NEO4J_HOST }}:7687|' config.yaml
 
             # Restart service
             sudo systemctl restart veris-chat
