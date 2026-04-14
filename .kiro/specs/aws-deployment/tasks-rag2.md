@@ -34,31 +34,35 @@ T7 = Update README
     # Verify Neo4j responds (from local via SSH tunnel, or from RAG EC2 directly)
     ```
 
-- [ ] Task 2: Update deploy scripts for v2
+- [x] Task 2: Update deploy scripts for v2
   - [x] 2.1 Update `deploy/user_data.sh` — add `neo4j` and `aioboto3` to pip install list
-    - Current pip install is missing: `neo4j`, `aioboto3`
-    - Python 3.11 is already correct (no change needed)
-    - Neo4j URI sed is already present (`bolt://localhost:7687` → `bolt://54.253.127.203:7687`)
   - [x] 2.2 Update `deploy/user_data.sh` — set `QDRANT_TUNNEL=false` in `.env` creation block
-    - EC2 connects directly to Qdrant Cloud, no tunnel needed
   - [x] 2.3 Verify `deploy/push_clean.sh` excludes `.kiro` and `deploy/push_clean.sh` (already does via `git reset HEAD`)
+  - [x] 2.4 Add SSE `chat.status` events for KG resolution, ingestion, memory, generation phases
+  - [x] 2.5 Local test passed: status events + streaming + session delete all working
 
 - [ ] Task 3: Push code and deploy to RAG EC2
+  - Note: Do NOT terminate old EC2 (frontend is using it). Launch a new instance without Elastic IP.
+  - After verifying v2 works, check with frontend dev (see `documents/frontend_checklist.md`), then reassociate EIP.
   - [ ] 3.1 Push latest code to deploy-clean branch
     ```bash
     bash deploy/push_clean.sh
     ```
-  - [ ] 3.2 Terminate old EC2 instance and launch fresh one
-    ```bash
-    bash deploy/ec2_launch.sh --terminate
-    bash deploy/ec2_launch.sh
-    ```
+  - [ ] 3.2 Launch new EC2 instance (keep old one running)
+    - Modify `ec2_launch.sh` to skip EIP association, or launch manually without `--terminate`
+    - Note the new instance's public IP from launch output
   - [ ] 3.3 Wait ~5-10 min for user-data setup, then SSH in to check
     ```bash
-    ssh -i ~/.ssh/race_lits_server.pem ec2-user@54.66.111.21
+    ssh -i ~/.ssh/race_lits_server.pem ec2-user@<NEW_IP>
     sudo tail -f /var/log/user-data.log
     systemctl status veris-chat
     ```
+  - [ ] 3.4 Confirm with frontend dev (`documents/frontend_checklist.md`) that `chat.status` SSE events won't break the frontend
+  - [ ] 3.5 Reassociate Elastic IP `54.66.111.21` from old EC2 to new EC2
+    ```bash
+    aws ec2 associate-address --region ap-southeast-2 --instance-id <NEW_INSTANCE_ID> --allocation-id eipalloc-0d54fe66102d6007c
+    ```
+  - [ ] 3.6 Terminate old EC2 instance
 
 - [ ] Task 4: Verify deployment
   - [ ] 4.1 Health check
