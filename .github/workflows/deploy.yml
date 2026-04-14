@@ -1,0 +1,33 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [deploy-clean]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            cd /home/ec2-user/veris-chat
+
+            # Fetch latest from deploy-clean (force-pushed orphan branch)
+            git fetch origin deploy-clean
+            git reset --hard origin/deploy-clean
+
+            # Update Neo4j URI for EC2 (local config uses localhost)
+            sed -i 's|bolt://localhost:7687|bolt://54.253.127.203:7687|' config.yaml
+
+            # Restart service
+            sudo systemctl restart veris-chat
+
+            # Wait and verify
+            sleep 3
+            curl -sf http://localhost:8000/health || echo "WARNING: health check failed"

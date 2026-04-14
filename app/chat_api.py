@@ -298,6 +298,7 @@ async def chat_stream_endpoint(request: ChatRequest):
         
         try:
             # Resolve parcel data from KG (if parcel session)
+            yield formatter.format_sse({"type": "status", "content": "Resolving parcel data..."})
             parcel_data = _resolve_parcel_data(request.session_id, logger)
             document_urls = parcel_data["document_urls"] or request.document_urls
             

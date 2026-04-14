@@ -605,6 +605,7 @@ async def async_chat(
     
     # Step 1: Document Ingestion (sync - typically fast or cached)
     if document_urls:
+        yield {"type": "status", "content": "Ingesting documents..."}
         timing["ingestion"] = _ingest_documents(document_urls, session_id, config)
     
     # Step 2: Create retriever and query engine
@@ -620,6 +621,7 @@ async def async_chat(
     memory = None
     memory_context = None
     if use_memory:
+        yield {"type": "status", "content": "Retrieving memory..."}
         memory, memory_context, timing["memory"] = _get_memory_context(
             session_id, message, config
         )
@@ -647,6 +649,7 @@ async def async_chat(
     logger.info(f"[SERVICE] Starting streaming generation...")
     logger.info(f"[SERVICE] Using LLM model: {streaming_llm.model}")
     logger.info(f"[SERVICE] LLM region_name: {getattr(streaming_llm, 'region_name', 'NOT SET')}")
+    yield {"type": "status", "content": "Generating response..."}
     t_generation_start = time.perf_counter()
     
     # Build message list with proper system message placement
@@ -764,6 +767,14 @@ class OpenAIStreamFormatter:
                     "finish_reason": "error",
                 }],
                 "error": {"message": chunk["content"]},
+            }
+        
+        elif chunk_type == "status":
+            return {
+                "id": self.completion_id,
+                "object": "chat.status",
+                "created": self.created,
+                "status": chunk["content"],
             }
         
         elif chunk_type == "done":

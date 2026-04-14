@@ -131,6 +131,7 @@ AWS_ACCESS_KEY_ID=""
 AWS_SECRET_ACCESS_KEY=""
 AWS_SESSION_TOKEN=""
 AWS_REGION=us-east-1
+QDRANT_TUNNEL=false
 EOF
 chown ec2-user:ec2-user ${APP_DIR}/.env
 
@@ -150,12 +151,14 @@ sudo -u ec2-user pip3.11 install --user  -v --no-cache-dir \
     llama-index-vector-stores-qdrant \
     qdrant-client>=1.7.0 \
     boto3>=1.34.0 \
+    aioboto3 \
     python-dotenv>=1.0.0 \
     pymupdf \
     llama-index-llms-bedrock-converse \
     mem0ai \
     fastapi \
-    uvicorn
+    uvicorn \
+    neo4j
 
 # ============================================================================
 # SYSTEMD SERVICE SETUP
