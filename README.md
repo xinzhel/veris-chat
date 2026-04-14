@@ -98,9 +98,15 @@ Be Careful of Network firewall, e.g.,
 - eduroam ❌ timeout (likely also firewall)
 
 ## (Optional) Local Setup
+
+See [documents/environment_setup.md](documents/environment_setup.md) for full setup instructions (Python version, uv, lits-llm dependency).
+
+Quick start:
 ```bash
-conda env create -f environment.yaml
-conda activate veris_vectordb
+uv venv .venv --python 3.11
+source .venv/bin/activate
+uv pip install -r pyproject.toml
+uv pip install -e prev_projects_repo/lits_llm
 aws sso login  # if using SSO credentials
 ```
 
