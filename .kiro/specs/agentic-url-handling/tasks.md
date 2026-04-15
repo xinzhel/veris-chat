@@ -6,6 +6,7 @@
 T1 ──→ T2 ──→ T3 ──→ T5 ──→ T7 ──→ T8
               T4 ──→ T5
               T6 ──→ T7
+              T3 ──→ T9
 ```
 
 T1 = AsyncBedrockChatModel (lits/lm)
@@ -16,6 +17,7 @@ T5 = react/loop.py integration
 T6 = rag_app/ + react_app/ + main.py
 T7 = End-to-end test
 T8 = Citation follow-up test
+T9 = docs/agents/NativeReAct.md
 
 ## Tasks
 
@@ -29,14 +31,19 @@ T8 = Citation follow-up test
   - [x] `format_tool_result(tool_use_id, observation) -> dict` — Bedrock Converse format
   - [x] Add `async-bedrock/` prefix to `get_lm()` factory in `lits/lm/__init__.py`
 
-- [ ] Task 2: Implement `NativeToolUsePolicy` (`lits/components/policy/native_tool_use.py`)
-  - [ ] Add `assistant_raw: Optional[dict] = None` and `user_message: Optional[str] = None` to `ToolUseStep` in `lits/structures/tool_use.py`
-  - [ ] Override `_build_messages(query, state)`:
-    - Iterate state: use `step.assistant_raw` directly for assistant messages
+- [x] Task 2: Implement `NativeToolUsePolicy` (`lits/components/policy/native_tool_use.py`)
+  - [x] Extract `BaseToolUseStep` from `ToolUseStep` in `lits/structures/tool_use.py`
+    - Shared fields: `action`, `observation`, `answer` + `get_action()`, `get_observation()`, `get_answer()`
+    - `ToolUseStep` inherits `BaseToolUseStep`, keeps `think`, `assistant_message`, extractors (no change to existing code)
+  - [x] Create `NativeToolUseStep(BaseToolUseStep)` in `lits/structures/tool_use.py`
+    - Fields: `assistant_message_dict: Optional[dict]` (LLM raw response), `user_message: Optional[str]` (multi-turn)
+    - Override `to_dict()`, `from_dict()`, `to_messages()`
+  - [x] Update `ToolUseTransition.step()` assert: `isinstance(step, BaseToolUseStep)` instead of `ToolUseStep`
+  - [x] Override `_build_messages(query, state)` in `NativeToolUsePolicy`:
+    - Use `step.assistant_message_dict` directly for assistant messages
     - Use `self.base_model.format_tool_result()` for tool result messages (provider-agnostic)
     - Handle `step.user_message` for multi-turn conversation history
-    - Handle `step.answer` for previous final answers
-  - [ ] Override `_get_actions()`: pass `tools=self.tool_schemas` via `_call_model(**kwargs)`, handle `ToolCallOutput` vs `Output`
+  - [x] Override `_get_actions()`: pass `tools=self.tool_schemas` via `_call_model(**kwargs)`, handle `ToolCallOutput` vs `Output`
 
 - [ ] Task 3: Implement `NativeReAct` (`lits/agents/chain/native_react.py`)
   - [ ] `from_tools(tools, model_name, system_message, max_iter, ...)` factory method
@@ -87,3 +94,9 @@ T8 = Citation follow-up test
     3. Agent reasons from conversation history to identify the cited file
     4. Agent calls `get_all_chunks(url=<resolved URL>)` and summarizes
   - [ ] Validates: conversation history in state + LLM reasoning over previous citations + tool use
+
+- [ ] Task 9: Write `docs/agents/NativeReAct.md` in lits_llm
+  - [ ] Explain "Native" = uses LLM's native tool use API (structured JSON tool calls), not text-based XML parsing
+  - [ ] Highlight provider-agnostic abstraction: `ToolCall`, `ToolCallOutput`, `format_tool_result()`, `tool_use_id`
+  - [ ] Architecture: AsyncBedrockChatModel → NativeToolUsePolicy → NativeReAct
+  - [ ] Usage examples: `from_tools()` factory, `run()`, `stream()`
