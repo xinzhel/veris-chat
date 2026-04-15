@@ -41,50 +41,29 @@ T7 = Update README
   - [x] 2.4 Add SSE `chat.status` events for KG resolution, ingestion, memory, generation phases
   - [x] 2.5 Local test passed: status events + streaming + session delete all working
 
-- [ ] Task 3: Push code and deploy to RAG EC2
+- [x] Task 3: Push code and deploy to RAG EC2
   - Note: Do NOT terminate old EC2 (frontend is using it). Launch a new instance without Elastic IP.
   - After verifying v2 works, check with frontend dev (see `documents/frontend_checklist.md`), then reassociate EIP.
-  - [ ] 3.1 Push latest code to deploy-clean branch
+  - [x] 3.1 Push latest code to deploy-clean branch
+  - [x] 3.2 Launch new EC2 instance (keep old one running)
+    - Instance ID: `i-09e8c72cc707f927e`, Public IP: `16.176.180.235`, Tag: `veris-chat-v2`
+  - [x] 3.3 Fixed: `load_config()` missing `neo4j` key (was falling back to `bolt://localhost:7687`)
+  - [x] 3.4 Fixed: KG EC2 security group — added VPC CIDR `172.31.0.0/16` rule for port 7687
+  - [ ] 3.5 Confirm with frontend dev (`documents/frontend_checklist.md`) that `chat.status` SSE events won't break the frontend
+  - [ ] 3.6 Reassociate Elastic IP `54.66.111.21` from old EC2 to new EC2
     ```bash
-    bash deploy/push_clean.sh
+    aws ec2 associate-address --region ap-southeast-2 --instance-id i-09e8c72cc707f927e --allocation-id eipalloc-0d54fe66102d6007c
     ```
-  - [ ] 3.2 Launch new EC2 instance (keep old one running)
-    - Modify `ec2_launch.sh` to skip EIP association, or launch manually without `--terminate`
-    - Note the new instance's public IP from launch output
-  - [ ] 3.3 Wait ~5-10 min for user-data setup, then SSH in to check
+  - [ ] 3.7 Terminate old EC2 instance
     ```bash
-    ssh -i ~/.ssh/race_lits_server.pem ec2-user@<NEW_IP>
-    sudo tail -f /var/log/user-data.log
-    systemctl status veris-chat
+    aws ec2 terminate-instances --region ap-southeast-2 --instance-ids i-04083f11879703da7
     ```
-  - [ ] 3.4 Confirm with frontend dev (`documents/frontend_checklist.md`) that `chat.status` SSE events won't break the frontend
-  - [ ] 3.5 Reassociate Elastic IP `54.66.111.21` from old EC2 to new EC2
-    ```bash
-    aws ec2 associate-address --region ap-southeast-2 --instance-id <NEW_INSTANCE_ID> --allocation-id eipalloc-0d54fe66102d6007c
-    ```
-  - [ ] 3.6 Terminate old EC2 instance
 
-- [ ] Task 4: Verify deployment
-  - [ ] 4.1 Health check
-    ```bash
-    curl http://54.66.111.21:8000/health
-    ```
-  - [ ] 4.2 Test parcel session (KG integration end-to-end)
-    ```bash
-    curl -X POST http://54.66.111.21:8000/chat/stream/ \
-      -H "Content-Type: application/json" \
-      -d '{"session_id": "433375739::deploy_test", "message": "Is this a priority site?"}' \
-      --no-buffer
-    ```
-  - [ ] 4.3 Verify KG resolution works (check logs for "Querying KG for PFI")
-    ```bash
-    ssh -i ~/.ssh/race_lits_server.pem ec2-user@54.66.111.21
-    journalctl -u veris-chat --no-pager | grep "KG"
-    ```
-  - [ ] 4.4 Clean up test session
-    ```bash
-    curl -X DELETE "http://54.66.111.21:8000/chat/sessions/433375739::deploy_test?clear_parcel_cache=true"
-    ```
+- [x] Task 4: Verify deployment
+  - [x] 4.1 Health check — `{"status":"healthy"}`
+  - [x] 4.2 Test parcel session — KG resolution + PDF ingestion + streaming with citations all working
+  - [x] 4.3 Status SSE events: Resolving parcel data → Ingesting documents → Retrieving memory → Generating response
+  - [x] 4.4 Timing: ingestion 1.0s, retrieval 0.9s, generation 12.3s, memory 5.3s, total 23.1s
 
 - [ ] Task 5: Final checkpoint — deployment complete when:
   - [ ] RAG EC2 running with veris-chat service active at `http://54.66.111.21:8000`
