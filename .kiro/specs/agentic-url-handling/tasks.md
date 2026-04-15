@@ -19,15 +19,15 @@ T8 = Citation follow-up test
 
 ## Tasks
 
-- [ ] Task 1: Implement `AsyncBedrockChatModel` (`lits/lm/async_bedrock.py`)
-  - [ ] Add `ToolCallOutput(Output)` and `ToolCall` dataclass to `lits/lm/base.py`
+- [x] Task 1: Implement `AsyncBedrockChatModel` (`lits/lm/async_bedrock.py`)
+  - [x] Add `ToolCallOutput(Output)` and `ToolCall` dataclass to `lits/lm/base.py`
     - `ToolCallOutput.tool_calls: list[ToolCall]`, `stop_reason: str`, `raw_message: dict`
-  - [ ] Async `__call__` using aioboto3 `converse_stream()`
+  - [x] Async `__call__` using aioboto3 `converse_stream()`
     - When `tools=None`: returns `Output(text)`
     - When `tools` provided: uses Converse API `toolConfig`, returns `ToolCallOutput`
     - Dispatch on `contentBlockStart`: `toolUse` → collect tool call, text → stream tokens
-  - [ ] `format_tool_result(tool_use_id, observation) -> dict` — Bedrock Converse format
-  - [ ] Add `async-bedrock/` prefix to `get_lm()` factory in `lits/lm/__init__.py`
+  - [x] `format_tool_result(tool_use_id, observation) -> dict` — Bedrock Converse format
+  - [x] Add `async-bedrock/` prefix to `get_lm()` factory in `lits/lm/__init__.py`
 
 - [ ] Task 2: Implement `NativeToolUsePolicy` (`lits/components/policy/native_tool_use.py`)
   - [ ] Add `assistant_raw: Optional[dict] = None` and `user_message: Optional[str] = None` to `ToolUseStep` in `lits/structures/tool_use.py`
