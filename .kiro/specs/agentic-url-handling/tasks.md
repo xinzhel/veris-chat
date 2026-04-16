@@ -10,14 +10,14 @@ T1 ──→ T2 ──→ T3 ──→ T5 ──→ T7 ──→ T8
 ```
 
 T1 = AsyncBedrockChatModel (lits/lm)
-T2 = NativeToolUsePolicy (lits/components) — depends on T1 for format_tool_result()
-T3 = NativeReAct (lits/agents)
+T2 = AsyncNativeToolUsePolicy (lits/components) — depends on T1 for format_tool_result()
+T3 = AsyncNativeReAct (lits/agents)
 T4 = Tool definitions (react/)
 T5 = react/loop.py integration
 T6 = rag_app/ + react_app/ + main.py
 T7 = End-to-end test
 T8 = Citation follow-up test
-T9 = docs/agents/NativeReAct.md
+T9 = docs/agents/AsyncNativeReAct.md
 
 ## Tasks
 
@@ -31,7 +31,7 @@ T9 = docs/agents/NativeReAct.md
   - [x] `format_tool_result(tool_use_id, observation) -> dict` — Bedrock Converse format
   - [x] Add `async-bedrock/` prefix to `get_lm()` factory in `lits/lm/__init__.py`
 
-- [x] Task 2: Implement `NativeToolUsePolicy` (`lits/components/policy/native_tool_use.py`)
+- [x] Task 2: Implement `AsyncNativeToolUsePolicy` (`lits/components/policy/native_tool_use.py`)
   - [x] Extract `BaseToolUseStep` from `ToolUseStep` in `lits/structures/tool_use.py`
     - Shared fields: `action`, `observation`, `answer` + `get_action()`, `get_observation()`, `get_answer()`
     - `ToolUseStep` inherits `BaseToolUseStep`, keeps `think`, `assistant_message`, extractors (no change to existing code)
@@ -39,23 +39,23 @@ T9 = docs/agents/NativeReAct.md
     - Fields: `assistant_message_dict: Optional[dict]` (LLM raw response), `user_message: Optional[str]` (multi-turn)
     - Override `to_dict()`, `from_dict()`, `to_messages()`
   - [x] Update `ToolUseTransition.step()` assert: `isinstance(step, BaseToolUseStep)` instead of `ToolUseStep`
-  - [x] Override `_build_messages(query, state)` in `NativeToolUsePolicy`:
+  - [x] Override `_build_messages(query, state)` in `AsyncNativeToolUsePolicy`:
     - Use `step.assistant_message_dict` directly for assistant messages
     - Use `self.base_model.format_tool_result()` for tool result messages (provider-agnostic)
     - Handle `step.user_message` for multi-turn conversation history
   - [x] Override `_get_actions()`: pass `tools=self.tool_schemas` via `_call_model(**kwargs)`, handle `ToolCallOutput` vs `Output`
 
-- [ ] Task 3: Implement `NativeReAct` (`lits/agents/chain/native_react.py`)
-  - [ ] `from_tools(tools, model_name, system_message, max_iter, ...)` factory method
-  - [ ] `run(query, query_idx, checkpoint_dir, ...)` sync execution — reuse `ChainAgent` checkpoint mechanism (`query_idx` as session_id)
-  - [ ] `run_async(query, ...)` async execution
-  - [ ] `stream(query, query_idx, checkpoint_dir, ...)` async generator:
+- [x] Task 3: Implement `AsyncNativeReAct` (`lits/agents/chain/native_react.py`)
+  - [x] `from_tools(tools, model_name, system_message, max_iter, ...)` factory method
+  - [x] `run_async(query, query_idx, checkpoint_dir, ...)` async non-streaming — reuses `ChainAgent` checkpoint mechanism (`query_idx` as session_id)
+  - [x] `stream(query, query_idx, checkpoint_dir, ...)` async generator:
     - Load state from checkpoint (if exists)
-    - Append `ToolUseStep(user_message=query)` to state
-    - ReAct loop: call policy → if tool_call, yield `{"type": "status", ...}` via `STATUS_MAP`, execute tool, update state → if final answer, yield `{"type": "token", ...}` per token
+    - Append `NativeToolUseStep(user_message=query)` to state
+    - ReAct loop: call `policy._get_actions_stream()` → if tool_call, yield `{"type": "status", ...}` via `STATUS_MAP`, execute tool → if text_delta, yield `{"type": "token", ...}`
     - Save state to checkpoint
     - Yield `{"type": "done", ...}` with full answer + timing
-  - [ ] Multi-turn: state persists across calls via checkpoint, not reset between turns
+  - [x] `_get_actions_stream()` added to `AsyncNativeToolUsePolicy` — streaming version reusing `_build_messages()` + `set_system_prompt()`
+  - [x] Multi-turn: state persists across calls via checkpoint, not reset between turns
 
 - [ ] Task 4: Implement tool definitions (`react/tools.py`)
   - [ ] `SearchDocumentsTool(BaseTool)` — wraps `retrieve_with_url_filter()` from `rag_core/chat/retriever.py`
@@ -67,7 +67,7 @@ T9 = docs/agents/NativeReAct.md
   - [ ] `react_chat(session_id, message, system_message, parcel_context, document_urls, ...)` async generator
   - [ ] Ingest `document_urls` via `IngestionClient.store()` before entering ReAct loop
   - [ ] Build tools (`SearchDocumentsTool`, `GetAllChunksTool`) with session-scoped context
-  - [ ] Create agent via `NativeReAct.from_tools(tools, model_name, system_message + parcel_context)`
+  - [ ] Create agent via `AsyncNativeReAct.from_tools(tools, model_name, system_message + parcel_context)`
   - [ ] Call `agent.stream(message, query_idx=session_id, checkpoint_dir="data/chat_state/")`
   - [ ] Yield chunks from agent to caller
 
@@ -95,8 +95,8 @@ T9 = docs/agents/NativeReAct.md
     4. Agent calls `get_all_chunks(url=<resolved URL>)` and summarizes
   - [ ] Validates: conversation history in state + LLM reasoning over previous citations + tool use
 
-- [ ] Task 9: Write `docs/agents/NativeReAct.md` in lits_llm
+- [ ] Task 9: Write `docs/agents/AsyncNativeReAct.md` in lits_llm
   - [ ] Explain "Native" = uses LLM's native tool use API (structured JSON tool calls), not text-based XML parsing
   - [ ] Highlight provider-agnostic abstraction: `ToolCall`, `ToolCallOutput`, `format_tool_result()`, `tool_use_id`
-  - [ ] Architecture: AsyncBedrockChatModel → NativeToolUsePolicy → NativeReAct
+  - [ ] Architecture: AsyncBedrockChatModel → AsyncNativeToolUsePolicy → AsyncNativeReAct
   - [ ] Usage examples: `from_tools()` factory, `run()`, `stream()`

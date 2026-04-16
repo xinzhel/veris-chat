@@ -36,7 +36,7 @@ rag_core/            ← existing RAG pipeline (untouched)
 react/               ← this project's ReAct integration
   __init__.py
   tools.py              BaseTool subclasses wrapping rag_core
-  loop.py               Thin wrapper around NativeReAct
+  loop.py               Thin wrapper around AsyncNativeReAct
 
 rag_app/             ← RAG endpoints (renamed from app/)
   chat_api.py
@@ -60,14 +60,14 @@ rag_app/chat_api.py → service.async_chat() → fixed pipeline → SSE stream
 ### New Agent Mode (parallel path)
 
 ```
-react_app/chat_api.py → react/loop.py → lits/NativeReAct → ReAct loop → SSE stream
+react_app/chat_api.py → react/loop.py → lits/AsyncNativeReAct → ReAct loop → SSE stream
 ```
 
 Two independent routers mounted on the same FastAPI instance via `main.py`.
 
 ## ReAct Loop
 
-Implemented via `lits/NativeReAct`, which uses Bedrock's native tool use API (structured JSON tool calls, not text-parsing). See "LiTS Integration" section for full architecture.
+Implemented via `lits/AsyncNativeReAct`, which uses Bedrock's native tool use API (structured JSON tool calls, not text-parsing). See "LiTS Integration" section for full architecture.
 
 The loop uses `converse_stream()` for every LLM call. `contentBlockStart` determines whether the response is a tool call or final answer — no need to wait for `stop_reason`.
 
@@ -178,7 +178,7 @@ async def react_stream_endpoint(request: ChatRequest):
 
 Endpoints:
 - `POST /rag/chat/stream/` → existing RAG pipeline (unchanged)
-- `POST /react/chat/stream/` → NativeReAct agent
+- `POST /react/chat/stream/` → AsyncNativeReAct agent
 - `DELETE /react/sessions/{session_id}` → archive state, clean session_index
 
 ### SSE Event Types
@@ -218,8 +218,8 @@ STATUS_MAP = {
 
 What we ADD to lits (all new files, zero changes to existing):
 - `AsyncBedrockChatModel` — async LM with native tool use + streaming
-- `NativeToolUsePolicy` — structured tool calls instead of text parsing
-- `NativeReAct` — async/streaming ReAct agent with `from_tools()` factory
+- `AsyncNativeToolUsePolicy` — structured tool calls instead of text parsing
+- `AsyncNativeReAct` — async/streaming ReAct agent with `from_tools()` factory
 
 ## LiTS Integration
 
@@ -345,13 +345,13 @@ class AsyncOpenAIChatModel:
         return {"role": "tool", "tool_call_id": tool_use_id, "content": observation}
 ```
 
-#### 2. Components: NativeToolUsePolicy
+#### 2. Components: AsyncNativeToolUsePolicy
 
 New policy subclass that uses native tool use instead of text parsing:
 
 ```python
 # lits/components/policy/native_tool_use.py (NEW)
-class NativeToolUsePolicy(Policy[ToolUseState, ToolUseStep]):
+class AsyncNativeToolUsePolicy(Policy[ToolUseState, ToolUseStep]):
     """Policy using LLM's native tool use API (structured tool calls).
     
     Overrides:
@@ -399,15 +399,15 @@ class NativeToolUsePolicy(Policy[ToolUseState, ToolUseStep]):
 
 Existing `ToolUsePolicy` (text-based) stays untouched. Users choose which policy to use.
 
-#### 3. Agents: NativeReAct
+#### 3. Agents: AsyncNativeReAct
 
 ```python
 # lits/agents/chain/native_react.py (NEW)
-class NativeReAct(ChainAgent[ToolUseState]):
+class AsyncNativeReAct(ChainAgent[ToolUseState]):
     """ReAct agent using native tool use API.
     
     Differences from ReActChat:
-    - Uses NativeToolUsePolicy (structured tool calls, not text parsing)
+    - Uses AsyncNativeToolUsePolicy (structured tool calls, not text parsing)
     - Supports async execution via run_async()
     - Supports streaming final answer
     - Factory method from_tools() for simple setup
@@ -417,7 +417,7 @@ class NativeReAct(ChainAgent[ToolUseState]):
     def from_tools(cls, tools: list[BaseTool], model_name: str, **kwargs):
         """Simple factory: just provide tools and model name."""
         model = get_lm(f"async-bedrock/{model_name}")
-        policy = NativeToolUsePolicy(base_model=model, tools=tools)
+        policy = AsyncNativeToolUsePolicy(base_model=model, tools=tools)
         transition = ToolUseTransition(tools=tools)
         return cls(policy=policy, transition=transition, **kwargs)
     
@@ -451,7 +451,7 @@ Zero changes to existing class behavior. All new code. Existing research pipelin
 
 ```python
 # react/loop.py — this project's ReAct integration
-from lits.agents.chain.native_react import NativeReAct
+from lits.agents.chain.native_react import AsyncNativeReAct
 from react.tools import SearchDocumentsTool, GetAllChunksTool
 
 async def react_chat(session_id, message, system_message, parcel_context, document_urls, ...):
@@ -470,7 +470,7 @@ async def react_chat(session_id, message, system_message, parcel_context, docume
     ]
     
     # 3. Create agent (system_message + parcel_context → system prompt)
-    agent = NativeReAct.from_tools(
+    agent = AsyncNativeReAct.from_tools(
         tools=tools,
         model_name="us.anthropic.claude-opus-4-6-v1",
         system_message=system_message + "\n\n" + parcel_context,
@@ -495,8 +495,8 @@ sequenceDiagram
     participant Client
     participant App as react_app/chat_api.py
     participant Glue as react/loop.py
-    participant Agent as lits/NativeReAct
-    participant Policy as lits/NativeToolUsePolicy
+    participant Agent as lits/AsyncNativeReAct
+    participant Policy as lits/AsyncNativeToolUsePolicy
     participant LM as lits/AsyncBedrockChatModel
     participant Tools as react/tools.py → rag_core/
 
@@ -508,7 +508,7 @@ sequenceDiagram
 
     Note over Glue: Ingest document_urls via IngestionClient.store()<br/>(before ReAct loop, same as RAG pipeline)
     Glue->>Glue: Build tools (SearchDocumentsTool, GetAllChunksTool)
-    Glue->>Agent: NativeReAct.from_tools(tools, model, system_message)
+    Glue->>Agent: AsyncNativeReAct.from_tools(tools, model, system_message)
     Glue->>Agent: agent.stream(message, query_idx=session_id, checkpoint_dir=...)
 
     Note over Agent: Load state from checkpoint (if exists)
@@ -586,7 +586,7 @@ ToolUseState = [
 - 不需要外部的 `ChatHistory` class 或单独的 JSON 文件
 - 符合 RL 的 state 定义：state 包含做决策所需的所有信息
 
-### NativeReAct 多轮调用
+### AsyncNativeReAct 多轮调用
 
 每次HTTP请求调用 `agent.stream(message, query_idx=session_id, checkpoint_dir=...)`，lits 内部自动 load/save state：
 
@@ -615,8 +615,8 @@ DELETE endpoint 清理运行时资源（session_index），但保留 state JSON 
 ## Scope
 
 Covers:
-- lits extensions: `AsyncBedrockChatModel`, `NativeToolUsePolicy`, `NativeReAct`
-- `react/` subpackage (tools + loop wrapping NativeReAct)
+- lits extensions: `AsyncBedrockChatModel`, `AsyncNativeToolUsePolicy`, `AsyncNativeReAct`
+- `react/` subpackage (tools + loop wrapping AsyncNativeReAct)
 - `react_app/` endpoints + `main.py` router mount
 - Conversation history via ToolUseState persistence (replaces Mem0 for agent mode)
 - Streaming support for final answer
@@ -657,7 +657,7 @@ Python的sync/async是根本性的分裂——`__call__`不能同时是sync和as
 
 分开后：sync类零改动，async类自由设计返回类型和streaming接口。两者共享`InferenceLogger`和config模式。
 
-**Q: `NativeToolUsePolicy._build_messages` 需要手工构建Converse API格式的messages吗？**
+**Q: `AsyncNativeToolUsePolicy._build_messages` 需要手工构建Converse API格式的messages吗？**
 
 不需要手工重建assistant message。LLM返回的raw assistant message（包含`toolUse` block）直接存在`ToolUseStep.assistant_raw`里，`_build_messages`原样使用。只有tool result message需要构建，但它只是把`observation`文本 + 从`assistant_raw`提取的`toolUseId`包装成Converse格式，很简单。
 
@@ -673,7 +673,7 @@ Python的sync/async是根本性的分裂——`__call__`不能同时是sync和as
 
 **Q: state的load/save应该在lits内部还是外部（react/loop.py）管理？**
 
-lits内部。lits已有`ChainAgent`的checkpoint机制（`checkpoint_dir` + `query_idx`）。`query_idx`概念上和`session_id`一样——都是定位一个state文件。`NativeReAct`复用这个机制：调用方传`query_idx=session_id`和`checkpoint_dir`，lits内部自动load → run → save。`react/loop.py`不需要手动管理state文件。
+lits内部。lits已有`ChainAgent`的checkpoint机制（`checkpoint_dir` + `query_idx`）。`query_idx`概念上和`session_id`一样——都是定位一个state文件。`AsyncNativeReAct`复用这个机制：调用方传`query_idx=session_id`和`checkpoint_dir`，lits内部自动load → run → save。`react/loop.py`不需要手动管理state文件。
 
 **Q: `Policy._call_model`没有`tools`参数，怎么传tool schemas给LLM？**
 
