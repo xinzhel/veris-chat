@@ -68,13 +68,13 @@ T9 = docs/agents/AsyncNativeReAct.md
   - [x] Ingestion happens before ReAct loop (same as RAG pipeline)
   - [x] Pass `query_idx=session_id`, `checkpoint_dir="data/chat_state/"` to lits
 
-- [ ] Task 6: Implement `rag_app/`, `react_app/`, and `main.py`
-  - [ ] Rename `app/` → `rag_app/`, convert `app` FastAPI instance to `APIRouter`
-  - [ ] Create `react_app/__init__.py` and `react_app/chat_api.py` with `APIRouter`
-  - [ ] `POST /react/chat/stream/` — resolve parcel data, call `react_chat()`, SSE stream with `formatter.format_sse()`
-  - [ ] `DELETE /react/sessions/{session_id}` — clean session_index, archive state JSON with timestamp (`{session_id}__{timestamp}.json`), keep parcel_cache
-  - [ ] `main.py`: `app = FastAPI()`, `app.include_router(rag_router, prefix="/rag")`, `app.include_router(react_router, prefix="/react")`
-  - [ ] Update `uvicorn` start command: `uvicorn main:app --reload`
+- [x] Task 6: Implement `rag_app/`, `react_app/`, and `main.py`
+  - [x] Rename `app/` → `rag_app/`, convert `app` FastAPI instance to `APIRouter`
+  - [x] Create `react_app/__init__.py` and `react_app/chat_api.py` with `APIRouter`
+  - [x] `POST /react/chat/stream/` — resolve parcel data, call `react_chat()`, SSE stream
+  - [x] `DELETE /react/sessions/{session_id}` — clean session_index, archive state JSON with timestamp (`{session_id}__{timestamp}.json`), keep parcel_cache
+  - [x] `main.py`: `app = FastAPI()`, `app.include_router(rag_router, prefix="/rag")`, `app.include_router(react_router, prefix="/react")`
+  - [x] Update `uvicorn` start command: `uvicorn main:app --reload`
 
 - [ ] Task 7: End-to-end test
   - [ ] Test: parcel session → agent uses `search_documents` to answer question with citations

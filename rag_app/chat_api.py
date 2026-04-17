@@ -39,7 +39,7 @@ from typing import List, Optional, Dict, Any
 # Set AWS_REGION before other imports (us-east-1 required for Opus 4.5 with us.* prefix)
 os.environ.setdefault("AWS_REGION", "us-east-1")
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -86,11 +86,7 @@ def get_session_logger(session_id: str):
     return _session_loggers[session_id]
 
 
-app = FastAPI(
-    title="Veris Chat API",
-    description="Document-grounded conversational system with citation support",
-    version="1.0.0",
-)
+router = APIRouter()
 
 
 def _resolve_parcel_data(session_id: str, logger) -> Dict[str, Any]:
@@ -225,7 +221,7 @@ class ChatResponse(BaseModel):
 # =============================================================================
 
 
-@app.post("/chat/")
+@router.post("/chat/")
 async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
     """
     Synchronous chat endpoint with OpenAI-compatible response format.
@@ -270,7 +266,7 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/chat/stream/")
+@router.post("/chat/stream/")
 async def chat_stream_endpoint(request: ChatRequest):
     """
     Async streaming chat endpoint with OpenAI-compatible SSE format.
@@ -344,7 +340,7 @@ async def chat_stream_endpoint(request: ChatRequest):
     )
 
 
-@app.delete("/chat/sessions/{session_id}")
+@router.delete("/chat/sessions/{session_id}")
 async def delete_session(session_id: str, clear_parcel_cache: bool = False):
     """
     Clean up a parcel session: remove session index, memory, and cached KG data.
@@ -423,14 +419,3 @@ async def delete_session(session_id: str, clear_parcel_cache: bool = False):
     return {"status": "cleaned", "session_id": session_id, "cleaned": cleaned}
 
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy"}
-
-
-@app.get("/")
-async def root():
-    """Root endpoint - redirect to docs."""
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/docs")
