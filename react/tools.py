@@ -48,8 +48,7 @@ class SearchDocumentsTool(BaseTool):
     name = "search_documents"
     description = (
         "Search session documents by semantic similarity. "
-        "Returns the most relevant text chunks for the given query. "
-        "Use this when the user asks a specific question about the documents."
+        "Returns the most relevant text chunks for the given query."
     )
     args_schema = SearchDocumentsInput
 
@@ -111,7 +110,6 @@ class GetAllChunksTool(BaseTool):
     name = "get_all_chunks"
     description = (
         "Get all text chunks of a specific document by its URL. "
-        "Use this when the user asks to summarize or read an entire document. "
         "Returns all chunks in reading order."
     )
     args_schema = GetAllChunksInput
