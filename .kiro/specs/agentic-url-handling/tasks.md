@@ -63,13 +63,10 @@ T9 = docs/agents/AsyncNativeReAct.md
   - [x] Define `STATUS_MAP` in `react/tools.py`
   - NOTE: `react/` can import from `rag_core/`, but `rag_core/` never imports from `react/`. No new code added to `rag_core/`.
 
-- [ ] Task 5: Implement `react/loop.py`
-  - [ ] `react_chat(session_id, message, system_message, parcel_context, document_urls, ...)` async generator
-  - [ ] Ingest `document_urls` via `IngestionClient.store()` before entering ReAct loop
-  - [ ] Build tools (`SearchDocumentsTool`, `GetAllChunksTool`) with session-scoped context
-  - [ ] Create agent via `AsyncNativeReAct.from_tools(tools, model_name, system_message + parcel_context)`
-  - [ ] Call `agent.stream(message, query_idx=session_id, checkpoint_dir="data/chat_state/")`
-  - [ ] Yield chunks from agent to caller
+- [x] Task 5: Implement `react/loop.py`
+  - [x] `react_chat()` async generator: ingest documents → build tools → create agent → stream with checkpoint
+  - [x] Ingestion happens before ReAct loop (same as RAG pipeline)
+  - [x] Pass `query_idx=session_id`, `checkpoint_dir="data/chat_state/"` to lits
 
 - [ ] Task 6: Implement `rag_app/`, `react_app/`, and `main.py`
   - [ ] Rename `app/` → `rag_app/`, convert `app` FastAPI instance to `APIRouter`
