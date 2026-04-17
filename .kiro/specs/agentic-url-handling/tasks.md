@@ -57,11 +57,11 @@ T9 = docs/agents/AsyncNativeReAct.md
   - [x] `_get_actions_stream()` added to `AsyncNativeToolUsePolicy` — streaming version reusing `_build_messages()` + `set_system_prompt()`
   - [x] Multi-turn: state persists across calls via checkpoint, not reset between turns
 
-- [ ] Task 4: Implement tool definitions (`react/tools.py`)
-  - [ ] `SearchDocumentsTool(BaseTool)` — wraps `retrieve_with_url_filter()` from `rag_core/chat/retriever.py`
-  - [ ] `GetAllChunksTool(BaseTool)` — wraps new `get_all_chunks_by_url()` (Qdrant `scroll` with URL payload filter, no embedding)
-  - [ ] Add `get_all_chunks_by_url(client, collection_name, url) -> list[dict]` to `rag_core/chat/retriever.py`
-  - [ ] Define `STATUS_MAP = {"search_documents": "Searching documents...", "get_all_chunks": "Reading the full document..."}`
+- [x] Task 4: Implement tool definitions (`react/tools.py`)
+  - [x] `SearchDocumentsTool(BaseTool)` — imports `retrieve_with_url_filter()` from `rag_core/chat/retriever.py` (react imports rag_core, not the other way)
+  - [x] `GetAllChunksTool(BaseTool)` — implements Qdrant `scroll` with URL payload filter directly in `react/tools.py` (no changes to `rag_core/`)
+  - [x] Define `STATUS_MAP` in `react/tools.py`
+  - NOTE: `react/` can import from `rag_core/`, but `rag_core/` never imports from `react/`. No new code added to `rag_core/`.
 
 - [ ] Task 5: Implement `react/loop.py`
   - [ ] `react_chat(session_id, message, system_message, parcel_context, document_urls, ...)` async generator
