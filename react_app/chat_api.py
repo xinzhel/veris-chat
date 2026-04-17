@@ -186,9 +186,9 @@ async def delete_react_session(session_id: str):
     try:
         react_cfg = config.get("react", {})
         checkpoint_dir = react_cfg.get("checkpoint_dir", "data/chat_state")
-        state_file = Path(checkpoint_dir) / f"{session_id}.json"
+        state_file = Path(checkpoint_dir) / f"{session_id.replace('::', '__')}.json"
         if state_file.exists():
-            archive_name = f"{session_id}__{timestamp}.json"
+            archive_name = f"{session_id.replace('::', '__')}__{timestamp}.json"
             archive_path = state_file.parent / archive_name
             state_file.rename(archive_path)
             cleaned["state_archived"] = True

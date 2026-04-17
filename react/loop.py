@@ -115,9 +115,11 @@ async def react_chat(
     )
 
     # 5. Stream — lits handles checkpoint load/save internally
+    #    Sanitize session_id for filesystem (:: not allowed on Windows)
+    checkpoint_id = session_id.replace("::", "__")
     async for chunk in agent.stream(
         query=message,
-        query_idx=session_id,
+        query_idx=checkpoint_id,
         checkpoint_dir=react_cfg["checkpoint_dir"],
     ):
         yield chunk
