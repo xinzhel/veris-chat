@@ -1,10 +1,20 @@
 # Agentic URL Handling
 
-## Problem
+## Motivation: RAG → ReAct
 
-When a user says "summarize this PDF: https://xxx" or "what's in https://xxx", the current system:
-1. Ignores URLs in the user message (only uses KG-resolved or request-supplied `document_urls`)
-2. Uses top-K chunk retrieval, which doesn't work for "summarize the whole document"
+The fixed RAG pipeline (CitationQueryEngine + top-K retrieval) has two fundamental limitations:
+
+**1. No tool-use flexibility.** The pipeline always runs the same sequence: ingest → retrieve top-K → generate. It cannot adapt to queries that require different strategies. For example:
+- "Summarize this PDF: https://xxx" — "this PDF" and "https://xxx" are references to a whole document, not a semantic query. Top-K retrieval can't handle this — it needs a payload filter to get all chunks by URL, which is a fundamentally different operation.
+- "What does the document say about waste storage limits?" — needs semantic search
+- The LLM should decide which tool to use based on the query, not follow a fixed pipeline.
+
+**2. No conversational context.** The pipeline uses Mem0 for memory, which extracts independent facts from conversations. This loses the sequential context needed for follow-up queries like:
+- "Summarize the document you referred to in the 2nd paragraph above" — Mem0 doesn't know what "2nd paragraph above" means
+- "Is there licence ID information in the document you mentioned above?" — Mem0 extracted facts don't preserve which document was cited where
+- The LLM needs the full conversation history (user messages + assistant responses + tool calls) to resolve these references.
+
+The ReAct agent addresses both: the LLM chooses tools dynamically (search vs get-all-chunks), and raw conversation history in `ToolUseState` preserves full context across turns.
 
 ## Design Principle
 

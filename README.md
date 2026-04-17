@@ -122,3 +122,13 @@ uvicorn main:app --reload
 ## Network
 
 RMIT WiFi ❌ blocked | eduroam ❌ timeout — use SSH tunnel for Qdrant Cloud and Neo4j.
+
+Local dev requires SSH tunnel through KG EC2 (must be running):
+```bash
+ssh -fN \
+  -L 7687:localhost:7687 \
+  -L 6333:629f296f-654f-4576-ab93-e335d1ab3641.ap-southeast-2-0.aws.cloud.qdrant.io:6333 \
+  -i ~/.ssh/race_lits_server.pem ec2-user@54.253.127.203
+```
+
+This tunnels Neo4j (7687) and Qdrant Cloud (6333) through the KG EC2. Set `QDRANT_TUNNEL=true` in `.env`.
