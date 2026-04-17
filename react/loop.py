@@ -25,34 +25,24 @@ from lits.agents.chain.native_react import AsyncNativeReAct
 
 from react.tools import SearchDocumentsTool, GetAllChunksTool, STATUS_MAP
 from rag_core.chat.config import load_config
-from rag_core.ingestion.main_client import IngestionClient
+from rag_core.chat.service import _get_ingestion_client
 
 logger = logging.getLogger(__name__)
-
-# Module-level cache
-_cached_ingestion_client: Optional[IngestionClient] = None
 
 MODEL_NAME = "us.anthropic.claude-opus-4-6-v1"
 CHECKPOINT_DIR = "data/chat_state"
 MAX_ITER = 10
 
 
-def _get_ingestion_client() -> IngestionClient:
-    """Get or create cached IngestionClient."""
-    global _cached_ingestion_client
-    if _cached_ingestion_client is None:
-        config = load_config()
-        qdrant_cfg = config.get("qdrant", {})
-        models_cfg = config.get("models", {})
-        chunking_cfg = config.get("chunking", {})
-        _cached_ingestion_client = IngestionClient(
-            collection_name=qdrant_cfg.get("collection_name", "veris_pdfs"),
-            embedding_model=models_cfg.get("embedding_model", "cohere.embed-english-v3"),
-            embedding_dim=qdrant_cfg.get("vector_size", 1024),
-            chunk_size=chunking_cfg.get("chunk_size", 500),
-            chunk_overlap=chunking_cfg.get("overlap", 50),
-        )
-    return _cached_ingestion_client
+def _get_react_config() -> dict:
+    """Load react-specific config from config.yaml."""
+    config = load_config()
+    react_cfg = config.get("react", {})
+    return {
+        "model_name": react_cfg.get("model", MODEL_NAME),
+        "max_iter": react_cfg.get("max_iter", MAX_ITER),
+        "checkpoint_dir": react_cfg.get("checkpoint_dir", CHECKPOINT_DIR),
+    }
 
 
 async def react_chat(
@@ -61,8 +51,6 @@ async def react_chat(
     system_message: Optional[str] = None,
     parcel_context: Optional[str] = None,
     document_urls: Optional[List[str]] = None,
-    model_name: str = MODEL_NAME,
-    max_iter: int = MAX_ITER,
 ) -> AsyncGenerator[Dict, None]:
     """Multi-turn ReAct chat with streaming and state persistence.
 
@@ -85,12 +73,13 @@ async def react_chat(
         Dicts with ``type`` key: ``"token"``, ``"status"``, ``"done"``, ``"error"``.
     """
     config = load_config()
+    react_cfg = _get_react_config()
     collection_name = config.get("qdrant", {}).get("collection_name", "veris_pdfs")
 
     # 1. Ingest documents before ReAct loop (same as RAG pipeline)
+    ingestion_client = _get_ingestion_client(config)
     session_urls: Set[str] = set()
     if document_urls:
-        ingestion_client = _get_ingestion_client()
         for url in document_urls:
             try:
                 ingestion_client.store(url, session_id=session_id)
@@ -100,7 +89,6 @@ async def react_chat(
                 logger.error(f"[REACT] Failed to ingest {url}: {e}")
     else:
         # Load existing session URLs from session_index
-        ingestion_client = _get_ingestion_client()
         session_urls = ingestion_client.get_session_urls(session_id)
 
     # 2. Build tools (session-scoped)
@@ -120,17 +108,16 @@ async def react_chat(
     # 4. Create agent
     agent = AsyncNativeReAct.from_tools(
         tools=tools,
-        model_name=model_name,
+        model_name=react_cfg["model_name"],
         system_message=full_system_message,
-        max_iter=max_iter,
+        max_iter=react_cfg["max_iter"],
         status_map=STATUS_MAP,
     )
 
     # 5. Stream — lits handles checkpoint load/save internally
-    #    query_idx = session_id (checkpoint filename)
     async for chunk in agent.stream(
         query=message,
         query_idx=session_id,
-        checkpoint_dir=CHECKPOINT_DIR,
+        checkpoint_dir=react_cfg["checkpoint_dir"],
     ):
         yield chunk

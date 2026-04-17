@@ -64,3 +64,9 @@ neo4j:
   uri: "bolt://localhost:7687"
   user: "neo4j"
   password: "neo4jpassword"
+
+# ReAct agent settings
+react:
+  model: "us.anthropic.claude-opus-4-6-v1"
+  max_iter: 10
+  checkpoint_dir: "data/chat_state"
