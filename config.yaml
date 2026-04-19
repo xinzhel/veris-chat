@@ -67,6 +67,6 @@ neo4j:
 
 # ReAct agent settings
 react:
-  model: "us.anthropic.claude-opus-4-6-v1"
+  model: "async-bedrock/us.anthropic.claude-opus-4-6-v1"
   max_iter: 10
   checkpoint_dir: "data/chat_state"

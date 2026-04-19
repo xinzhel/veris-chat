@@ -29,7 +29,7 @@ from rag_core.chat.service import _get_ingestion_client
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "us.anthropic.claude-opus-4-6-v1"
+MODEL_NAME = "async-bedrock/us.anthropic.claude-opus-4-6-v1"
 CHECKPOINT_DIR = "data/chat_state"
 MAX_ITER = 10
 
