@@ -16,6 +16,7 @@ import os
 os.environ.setdefault("AWS_REGION", "us-east-1")
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from rag_app.chat_api import router as rag_router
@@ -29,6 +30,13 @@ app = FastAPI(
 
 app.include_router(rag_router, prefix="/rag", tags=["RAG"])
 app.include_router(react_router, prefix="/react", tags=["ReAct"])
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
