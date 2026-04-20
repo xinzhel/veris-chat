@@ -145,16 +145,16 @@ cd ${APP_DIR}
 sudo -u ec2-user pip3.11 install --user --upgrade pip
 sudo -u ec2-user pip3.11 cache purge
 sudo -u ec2-user pip3.11 install --user  -v --no-cache-dir \
-    pyyaml>=6.0 \
-    requests>=2.31.0 \
-    llama-index>=0.9.0 \
+    "pyyaml>=6.0" \
+    "requests>=2.31.0" \
+    "llama-index>=0.9.0" \
     llama-index-llms-bedrock \
     llama-index-embeddings-bedrock \
     llama-index-vector-stores-qdrant \
-    qdrant-client>=1.7.0 \
-    boto3>=1.34.0 \
+    "qdrant-client>=1.7.0" \
+    "boto3>=1.34.0" \
     aioboto3 \
-    python-dotenv>=1.0.0 \
+    "python-dotenv>=1.0.0" \
     pymupdf \
     llama-index-llms-bedrock-converse \
     mem0ai \
