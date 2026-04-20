@@ -1,0 +1,184 @@
+import logging
+from pathlib import Path
+from typing import Optional, Callable, Optional, List, Dict, Any
+from dataclasses import dataclass, field, asdict
+from ..base import BaseConfig
+from .base import ChainAgent, ChainConfig
+from ...components.policy.env_grounded import EnvGroundedPolicy
+from ...components.base import Transition
+from ...structures.env_grounded import EnvState, EnvStep
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class EnvChainConfig(ChainConfig):
+    """
+    Configuration for environment-grounded chain agent.
+    
+    Inherits from ChainConfig (which inherits from BaseConfig):
+        - reasoning_method: The reasoning method identifier
+        - package_version: Version of the LiTS package
+        - policy_model_name: Name of the language model
+        - gpu_device: GPU device identifier
+        - max_length: Maximum token length
+        - max_steps: Maximum number of steps (default: 30 for env_chain)
+        - temperature: Sampling temperature (default: 0.0 for deterministic)
+        - dataset, import_modules, dataset_kwargs: Experiment metadata
+    
+    EnvChain-specific fields:
+        - goal_reached_reward: Reward when goal is reached
+        - goal_reward_default: Default reward for non-terminal states
+    """
+    max_steps: int = 30  # Override default for env_chain
+    # EnvChain-specific reward settings
+    goal_reached_reward: float = 100.0
+    goal_reward_default: float = 0.0
+
+class EnvChain(ChainAgent[EnvState]):
+    """
+    Implements a chain-like invocation of environment-grounded policy.
+    """
+    
+    def __init__(
+        self,
+        policy: EnvGroundedPolicy,
+        world_model: Transition,
+        max_steps: int = 10,
+    ):
+        super().__init__(max_steps=max_steps)
+        self.policy = policy
+        self.world_model = world_model
+
+    def run(
+        self,
+        query_or_goals: str,
+        init_state_str: str,
+        query_idx: Optional[int] = None,
+        from_phase: str = "",
+        checkpoint_dir: Optional[str] = None,
+        checkpoint_path: Optional[str] = None,
+        override: bool = False
+    ) -> EnvState:
+        """
+        Run the environment chain to generate a sequence of actions.
+        
+        Args:
+            init_state_str: the environment state.
+            query_idx: Optional index for logging/tracking.
+            from_phase: Description of current phase (e.g., 'planning', 'execution').
+            checkpoint_path: Optional path to save/load checkpoints.
+            override: If True, ignore existing checkpoints and start fresh.
+        
+        Returns:
+            Final EnvState after goal is reached or max steps exceeded.
+        
+        The returned state contains the full action history and can be used to
+        extract the action sequence or evaluate the solution.
+        """
+        logger.debug("Starting EnvChain with goals:\n%s\n", query_or_goals)
+        logger.debug("Initial state string:\n%s\n", init_state_str)
+        
+        # Validate inputs
+        assert isinstance(init_state_str, str) and len(init_state_str) > 0, "Initial state string must be a non-empty string."
+        assert isinstance(query_or_goals, str) and len(query_or_goals) > 0, "Verb goals must be a non-empty string."
+            
+        # Initialize or resume state
+        checkpoint_path = self.get_checkpoint_path(checkpoint_dir, query_idx, checkpoint_path)
+        
+        state = None
+        if checkpoint_path and not override:
+            state = self.resume_state(checkpoint_path, EnvState)
+            
+        if state is None:
+            state = self.world_model.init_state(init_state_str=init_state_str)
+        else:
+            # If we resumed, we might want to check if we are already done or where we are
+            pass
+        
+        start_step = len(state)
+        for step_idx in range(start_step, self.max_steps):
+            logger.debug("\n ======== Step %d ========\n", step_idx)
+            
+            # Check if goal is reached
+            if self.world_model.goal_check(query_or_goals, state.env_state, )[0]:
+                logger.info("Goal reached at step %d!", step_idx)
+                break
+            
+            # Generate action
+            steps = self.policy.get_actions(
+                state,
+                n_actions=1,
+                query=query_or_goals,
+                query_idx=query_idx,
+                from_phase=from_phase,
+            )
+            
+            if not steps:
+                # Should not happen - EnvGroundedPolicy always returns at least one step
+                logger.error("Policy returned no steps (unexpected)")
+                break
+            
+            step = steps[0]
+            
+            # Handle terminal errors - stop trajectory generation
+            if step.terminate:
+                logger.error("Terminal error in action generation: %s (action: %s)", step.error, step.action)
+                state.append(step)  # Preserve error step in trajectory
+                if checkpoint_path:
+                    state.save(checkpoint_path, query_or_goals)
+                    logger.debug("Checkpoint saved with terminal error: %s", checkpoint_path)
+                break
+            
+            # Handle non-terminal errors - append error step but continue might be possible
+            if step.error:
+                logger.warning("Error in action generation (non-terminal): %s (action: %s)", step.error, step.action)
+                # For non-terminal errors, we still have a valid action to try
+            
+            logger.debug("Selected action: %s", step.action)
+            
+            # Execute action via world model
+            try:
+                next_state, aux_data = self.world_model.step(
+                    state=state,
+                    step_or_action=step.action,
+                    query_or_goals=query_or_goals,
+                ) # tuple[EnvState, dict]
+                
+                assert isinstance(next_state, EnvState), "World model step must return EnvState"
+                assert isinstance(aux_data, dict), "World model step must return aux_data as dict"
+                # assert 'goal_reached' in aux_data, "aux_data must contain 'goal_reached' key"
+                
+                state = next_state
+                logger.debug("New state:\n%s\n", state.env_state)
+                logger.debug("Trajectory length: %d steps\n", len(state.render_history()))
+                
+            except Exception as e:
+                logger.error("Error in world model step: %s", e, exc_info=True)
+                break
+            
+            # Save checkpoint if requested
+            if checkpoint_path:
+                state.save(checkpoint_path, query_or_goals)
+                logger.debug("\nCheckpoint saved to %s\n", checkpoint_path)
+        
+        # Final goal check
+        if self.world_model.is_terminal(state, query_or_goals):
+            logger.info("Successfully reached goal!")
+        else:
+            logger.warning("Max steps reached without achieving goal")
+        
+        return state
+
+    def extract_action_sequence(self, state: EnvState) -> list:
+        """
+        Extract the sequence of actions from the final state.
+        
+        Args:
+            state: Final EnvState after running the agent.
+        
+        Returns:
+            List of action strings representing the action sequence.
+        """
+        if state.history:
+            return [str(step.action) for step in state.history if step.action]
+        return []

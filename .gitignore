@@ -63,3 +63,4 @@ htmlcov/
 dmypy.jsonneptune_deployment/
 deploy_kg/data/
 prev_projects_repo/
+backups/

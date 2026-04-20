@@ -1,0 +1,100 @@
+import logging
+from typing import Optional
+
+from ...lm import HfChatModel, HfModel, OpenAIChatModel
+from ...lm.bedrock_chat import BedrockChatModel
+
+from lits.components.base import Policy
+from ..utils import verb_tools
+from ...structures import ToolUseState, ToolUseStep
+from ...structures.base import ActionT
+from ...prompts.policy.tool_use import react_chat_tag_template
+from ...prompts.prompt import PromptTemplate
+
+logger = logging.getLogger(__name__)
+
+class ToolUsePolicy(Policy[ToolUseState, ActionT]):
+    """Policy that samples the next ReAct tool-use step from a chat model."""
+
+    # Interface category for this policy type
+    TASK_TYPE: str = "tool_use"
+
+    def _create_error_steps(self, n_actions: int, error_msg: str) -> list[ToolUseStep]:
+        """Create ToolUseStep error steps for ToolUsePolicy."""
+        return [ToolUseStep(action=None, observation=None, answer=None, error=error_msg) for _ in range(n_actions)]
+
+    def __init__(
+        self,
+        base_model,
+        tools,
+        task_prompt_spec=None,
+        tool_context: str = "",
+        stop_token: Optional[str] = "<observation>",
+        **kwargs,
+    ):
+        self.tools = tools
+        self.stop_token = stop_token
+        
+        super().__init__(base_model=base_model, task_prompt_spec=task_prompt_spec, **kwargs)
+
+        # If task_prompt_spec is a PromptTemplate, format it with tool information
+        if isinstance(self.task_prompt_spec, PromptTemplate):
+            self.task_prompt_spec = self.task_prompt_spec.format(
+                tool_context= tool_context.rstrip() + "\n\n" if tool_context else "",
+                tool_string = verb_tools(tools),
+                tool_names = ", ".join([tool.name for tool in tools])
+            )
+            assert self.task_prompt_spec is not None, "task_prompt_spec is None after formatting."
+
+    def _build_system_prompt(self) -> str:
+        return self.task_prompt_spec
+        
+    def _build_messages(self, query: str, state: ToolUseState) -> list[dict]:
+        return state.to_messages(query)
+
+    def _get_actions(
+        self,
+        query,
+        state: ToolUseState,
+        n_actions,
+        temperature,
+        at_depth_limit,
+        from_phase: str = "",
+        existing_siblings: list = None,
+        **kwargs
+    ) -> list[ToolUseStep]:
+        messages = self._build_messages(query, state)
+
+        # Sibling-aware diversity prompt
+        if existing_siblings:
+            siblings_str = "\n".join(f"- {s.verb_step()}" for s in existing_siblings)
+            diversity_note = (
+                "The following actions have already been chosen by other candidates. "
+                "Choose a DIFFERENT action:\n" + siblings_str
+            )
+            messages.append({"role": "user", "content": diversity_note})
+
+        outputs: list[ToolUseStep] = []
+        
+        logger.debug("Messages sent to model: %s", messages)
+        
+        for _ in range(n_actions):
+            response = self._call_model(
+                messages,
+                temperature=temperature,
+                max_length=self.max_length,
+                max_new_tokens=self.max_new_tokens,
+                top_p=self.top_p,
+                top_k=self.top_k,
+                stop=self.stop_token,
+            )
+            assistant_text = response.text.strip()
+            if not assistant_text:
+                logger.warning("Received empty assistant response from tool-use policy call.")
+                continue
+            step = ToolUseStep.from_assistant_message(assistant_text)
+            if step.answer is None and step.action is None:
+                logger.warning("Assistant output did not include an <action> or <answer>: %s", assistant_text)
+            outputs.append(step)
+
+        return outputs

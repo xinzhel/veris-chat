@@ -1,0 +1,565 @@
+import time, json, os, logging
+import boto3
+from botocore.exceptions import ClientError, NoCredentialsError
+from typing import List, Optional, Dict, Any, Union
+from .base import LanguageModel, Output, ToolCall, ToolCallOutput, InferenceLogger, ToolCall, ToolCallOutput
+
+logger = logging.getLogger(__name__)
+
+import json
+
+import json
+
+def parse_bedrock_invoke_model_response(response):
+    """
+    Parse Bedrock invoke_model() response for:
+    - Qwen (OpenAI format)
+    - Extracts text
+    - Extracts token usage (input/output tokens)
+    """
+
+    # ============== 1. Extract input/output tokens from headers ============
+    headers = response.get("ResponseMetadata", {}).get("HTTPHeaders", {})
+
+    header_input_tokens = int(headers.get("x-amzn-bedrock-input-token-count", 0))
+    header_output_tokens = int(headers.get("x-amzn-bedrock-output-token-count", 0))
+
+    # ============== 2. Read response body as JSON ===========================
+    raw_body = response["body"].read()
+    body_json = json.loads(raw_body)
+
+    # ============== 3. Extract text (OpenAI chat format) ====================
+    try:
+        text = body_json["choices"][0]["message"]["content"]
+    except KeyError:
+        raise RuntimeError(f"Could not extract text. body_json={body_json}")
+
+    # ============== 4. Extract usage (OpenAI usage format) ==================
+    openai_usage = body_json.get("usage", {})
+
+    prompt_tokens = openai_usage.get("prompt_tokens", header_input_tokens)
+    completion_tokens = openai_usage.get("completion_tokens", header_output_tokens)
+    total_tokens = openai_usage.get("total_tokens", prompt_tokens + completion_tokens)
+
+    # ============== 5. Return clean structured output =======================
+    return {
+        "text": text,
+        "input_tokens": prompt_tokens,
+        "output_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "raw_body": body_json,
+    }
+
+
+class BedrockChatModel(LanguageModel):
+    """
+    Wrapper for AWS Bedrock chat/inference models (Anthropic Claude, Amazon Nova, Mistral, etc.)
+    following the LiTS unified LanguageModel interface.
+    """
+
+    def __init__(
+        self,
+        model_name: str,
+        sys_prompt: Optional[str] = None,
+        aws_region: Optional[str] = None,
+        aws_profile: Optional[str] = None,
+        inference_logger: Optional[InferenceLogger] = None,
+        max_length: int = None,
+        max_new_tokens: int = None,
+        verbose: bool = False,
+        enable_thinking: bool = False,
+        **kwargs
+    ):
+        super().__init__(
+            model_name=model_name,
+            model=None,
+            tokenizer=None,
+            inference_logger=inference_logger,
+            enable_thinking=enable_thinking,
+            max_length=max_length,
+            max_new_tokens=max_new_tokens,
+            verbose=verbose
+        )
+
+        # AWS client setup
+        session_kwargs = {}
+        if aws_profile:
+            session_kwargs["profile_name"] = aws_profile
+        session = boto3.Session(**session_kwargs)
+        region = aws_region or os.getenv("AWS_REGION", "us-east-1")
+        from botocore.config import Config as BotoConfig
+        self.client = session.client(
+            "bedrock-runtime",
+            region_name=region,
+            config=BotoConfig(read_timeout=300),  # 5 min — long code generation can exceed 60s default
+        )
+
+        self.model_name = model_name
+        self.sys_prompt = sys_prompt
+        logger.info(f'System prompt for {self.model_name} set to: {self.sys_prompt}')
+        self.region = region
+
+        # Cap max_new_tokens to model's output limit
+        MODEL_OUTPUT_LIMITS = {
+            "haiku": 8192,
+            "sonnet-4-5": 16384,
+        }
+        for pattern, limit in MODEL_OUTPUT_LIMITS.items():
+            if pattern in self.model_name.lower():
+                if self.max_new_tokens and self.max_new_tokens > limit:
+                    logger.info(f"Capping max_new_tokens from {self.max_new_tokens} to {limit} for {self.model_name}")
+                    self.max_new_tokens = limit
+                elif not self.max_new_tokens:
+                    self.max_new_tokens = limit
+                break
+
+    def _format_messages(self, prompt, embed_system_prompt: bool = False):
+        """Return (messages, system_prompt) tuple formatted for Bedrock Converse. 
+        Input Example:
+            prompt = [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "Hello!"},
+                {"role": "assistant", "content": "Hi there! How can I help you?"}
+            ]
+        Messages Example:
+            messages = [
+                {"role": "user", "content": [{"text": "Hello!"}]},
+                {"role": "assistant", "content": [{"text": "Hi there! How can I help you?"}]}
+            ]
+        System Prompt Example:
+            system_prompt = "You are a helpful assistant."
+        """
+        system_prompt = None
+        if self.sys_prompt:
+            system_prompt = self.sys_prompt
+
+        if isinstance(prompt, str):
+            messages = [{"role": "user", "content": [{"text": prompt}]}]
+        elif isinstance(prompt, list):
+            messages = []
+            for p in prompt:
+                role, content = p["role"], p["content"]
+                assert role in ["system", "user", "assistant"], f"Invalid role: {role}"
+                if role == "system":
+                    if isinstance(content, str):
+                        system_prompt = content
+                    elif isinstance(content, list):
+                        system_prompt = content[0].get("text", "") if content else ""
+                else:
+                    if isinstance(content, str):
+                        messages.append({"role": role, "content": [{"text": content}]})
+                    elif isinstance(content, list):
+                        # Already in Converse format (e.g., toolUse/toolResult blocks)
+                        messages.append({"role": role, "content": content})
+                    else:
+                        messages.append(p)
+        else:
+            raise ValueError("Prompt must be a string or list of messages.")
+        
+        # prepend system_prompt
+        if embed_system_prompt and system_prompt:
+            messages.insert(0, {"role": "system", "content": system_prompt})
+        return messages, system_prompt
+
+    def __call__(
+        self,
+        prompt,
+        role: str = "default",
+        temperature: float = 0.7,
+        top_p: float = 0.9,
+        max_new_tokens: Optional[int] = None,
+        stop: Optional[Union[str, List[str]]] = None,
+        return_embedding: bool = False,
+        tools: Optional[List[dict]] = None,
+        **kwargs,
+    ) -> Union[Output, "ToolCallOutput"]:
+        """
+        Generates a response from the Bedrock chat model.
+        """
+        logger.debug(f"Extra kwargs passed to BedrockChatModel.__call__: {kwargs}")
+            
+        if return_embedding:
+            raise NotImplementedError("Embedding retrieval not implemented for Bedrock chat models.")
+        max_new_tokens = max_new_tokens or self.max_new_tokens or self.max_length
+        # print(f"Using invoke_model with max_new_tokens={max_new_tokens}")
+        
+        if isinstance(stop, str):
+            stop = [stop]
+        elif stop is None:
+            stop = []
+        else:
+            assert isinstance(stop, list), "stop must be a string or list of strings."
+        if kwargs.get("new_line_stop", False):
+            logging.warning(f"AWS Bedrock does not support '\n'")
+            
+        # Anthropic’s Bedrock implementation treats: 
+        # ""
+        # " "
+        # "\n"
+        # "\t"
+        # as invalid stop sequences
+        stop = [s for s in stop if s.strip()]
+        
+
+        # Anthropic, Amazon Nova, Titan, Meta, Mistral, Cohere, AI21 → use converse API
+        if any(k in self.model_name.lower() for k in ["anthropic", "claude", "nova", "titan", "meta", "mistral", "cohere", "ai21"]):
+            messages, system_prompt = self._format_messages(prompt, embed_system_prompt=False)
+            result = self._converse_api(messages, max_new_tokens, temperature, top_p, stop, system_prompt, tools=tools)
+        else:
+            messages, system_prompt = self._format_messages(prompt, embed_system_prompt=False)
+            result = self._invoke_request(messages, max_new_tokens, temperature, top_p, stop, system_prompt)
+
+        # If _converse_api returned a ToolCallOutput, handle it directly
+        if isinstance(result, ToolCallOutput):
+            if self.inference_logger and role is not None:
+                self.inference_logger.update_usage(
+                    input_tokens=getattr(result, '_input_tokens', 0),
+                    output_tokens=getattr(result, '_output_tokens', 0),
+                    batch=False,
+                    batch_size=1,
+                    role=role,
+                    running_time=0.0,
+                )
+            return result
+
+        text, input_tokens, output_tokens = result
+
+        if self.inference_logger and role is not None:
+            # Bedrock responses don’t always return usage counts, so just log approximate tokens
+            self.inference_logger.update_usage(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                batch=False,
+                batch_size=1,
+                role=role,
+                running_time=0.0
+            )
+
+        if self.verbose and self.LOG_MODEL_OUTPUT:
+            print(f"[{self.model_name}] → {text[:300]}")
+
+        return Output(text)
+
+    def _invoke_request(self, messages, max_new_tokens, temperature, top_p, stop, system_prompt) -> Dict[str, Any]:
+        logging.warning(f"Model {self.model_name} may not support Converse API; falling back to invoke_model. Note that response parsing may fail.")
+            
+        # Convert messages from Bedrock Converse format to OpenAI format
+        # Converse format: [{"role": "user", "content": [{"text": "..."}]}]
+        # OpenAI format: [{"role": "user", "content": "..."}]
+        openai_messages = []
+        for i, msg in enumerate(messages):
+            role = msg["role"]
+            # Extract text from content list
+            if isinstance(msg["content"], list):
+                content = msg["content"][0]["text"]
+                if i == 0:
+                    assert role == "user"
+                    content =  f"{system_prompt}\n\n + {content}"
+            else:
+                content = msg["content"]
+            openai_messages.append({"role": role, "content": content})
+        
+        # Cap max_tokens to reasonable value (many models have issues with very large values)
+        # For Qwen and similar models, max_tokens should be output tokens only, not total context
+        # Most models support up to 16K output tokens; context length is separate
+        if max_new_tokens > 16384:
+            logging.warning(f"Capping max_tokens from {max_new_tokens} to 16384 for invoke_model API")
+            max_new_tokens = 16384
+        
+        # Generic invoke_model interface (OpenAI format)
+        input_body = {
+            "messages": openai_messages,
+            "max_tokens": max_new_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+        }
+        
+        # Only add stop sequences if they exist
+        if stop:
+            input_body["stop"] = stop
+        
+        response = self.client.invoke_model(
+            modelId=self.model_name,
+            body=json.dumps(input_body),
+            accept="application/json",
+            contentType="application/json",
+        )
+        
+        result = parse_bedrock_invoke_model_response(response)
+        text = result["text"]
+        input_tokens = result["input_tokens"]
+        output_tokens = result["output_tokens"]
+        
+        return text, input_tokens, output_tokens
+        
+        
+    def get_loglikelihood(self, prefix: str, contents: list[str], **kwargs) -> "np.ndarray":
+        import numpy as np
+        
+        # Note: Only legacy Cohere Command Text (v14) models supported return_likelihoods.
+        # Newer Command R models and Titan/Claude do not support this via Bedrock API.
+        if "cohere" not in self.model_name.lower():
+            raise NotImplementedError(
+                f"get_loglikelihood is not supported for {self.model_name}. "
+                "On AWS Bedrock, only legacy Cohere Command models supported returning log probabilities."
+            )
+
+        results = []
+        for content in contents:
+            # Construct the full text
+            full_text = prefix + content
+            
+            # Cohere API payload (Legacy Command Text format)
+            body = json.dumps({
+                "prompt": full_text,
+                "max_tokens": 0,  # We don't want generation, just prompt evaluation
+                "return_likelihoods": "ALL",
+                "temperature": 0.0
+            })
+            
+            try:
+                response = self.client.invoke_model(
+                    modelId=self.model_name,
+                    body=body
+                )
+                response_body = json.loads(response.get("body").read())
+                
+                # Extract token likelihoods
+                # Cohere returns a list of {'token': '...', 'likelihood': -0.123}
+                token_likelihoods = response_body['generations'][0]['token_likelihoods']
+                
+                # We need to find where the 'content' starts in the token list.
+                # This is tricky without a local tokenizer that matches Cohere's exactly.
+                # A simplified approach is to sum the last N tokens, but that's imprecise.
+                # Ideally, you'd need the Cohere tokenizer locally to know the split index.
+                
+                # For now, we can sum all likelihoods (P(full_text)) or try to approximate.
+                # If we assume we want P(content | prefix), we need:
+                # log P(full_text) - log P(prefix)
+                
+                # To do this accurately, we need a separate call for the prefix:
+                log_prob_full = sum(t.get('likelihood', 0) for t in token_likelihoods)
+                
+                # Call for prefix only
+                body_prefix = json.dumps({
+                    "prompt": prefix,
+                    "max_tokens": 0,
+                    "return_likelihoods": "ALL",
+                    "temperature": 0.0
+                })
+                resp_prefix = self.client.invoke_model(modelId=self.model_name, body=body_prefix)
+                tokens_prefix = json.loads(resp_prefix.get("body").read())['generations'][0]['token_likelihoods']
+                log_prob_prefix = sum(t.get('likelihood', 0) for t in tokens_prefix)
+                
+                # P(content | prefix) = P(full_text) / P(prefix) -> log - log
+                conditional_log_prob = log_prob_full - log_prob_prefix
+                results.append(conditional_log_prob)
+                
+            except Exception as e:
+                logger.error(f"Error computing loglikelihood: {e}")
+                results.append(-np.inf)
+
+        return np.array(results)
+    
+    def _build_tool_config(self, tools: List[dict]) -> dict:
+        """Build toolConfig for Converse API from tool schema dicts.
+
+        Args:
+            tools: List of tool schemas, each with ``name``, ``description``, ``input_schema``.
+
+        Returns:
+            Converse API ``toolConfig`` dict.
+        """
+        tool_specs = []
+        for tool in tools:
+            tool_specs.append({
+                "toolSpec": {
+                    "name": tool["name"],
+                    "description": tool.get("description", ""),
+                    "inputSchema": {"json": tool["input_schema"]},
+                }
+            })
+        return {"tools": tool_specs}
+
+    @staticmethod
+    def format_tool_result(tool_use_id: str, observation: str) -> dict:
+        """Wrap tool observation as a Bedrock ``toolResult`` user message.
+
+        Lives on the model (not policy) because the format is provider-specific.
+        Policy calls ``self.base_model.format_tool_result()`` to stay agnostic.
+
+        Args:
+            tool_use_id: The ``toolUseId`` from the assistant's tool call.
+            observation: Tool execution result as text.
+
+        Returns:
+            Converse API user message with ``toolResult`` block.
+        """
+        return {
+            "role": "user",
+            "content": [{
+                "toolResult": {
+                    "toolUseId": tool_use_id,
+                    "content": [{"text": observation}],
+                }
+            }],
+        }
+
+    def _converse_api(self, messages, max_new_tokens, temperature, top_p, stop, system_prompt, tools=None) -> Dict[str, Any]:
+        """Helper to call the Converse API.
+        ### 📝 Example Response (Raw Converse API Output)
+
+        **Text-based response** (no tools, or tools not invoked):
+
+            ```json
+            {
+                "output": {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "text": "To answer this question, we need to check if the given address is listed in the Priority Sites Register. Let's start by geocoding the address to get its coordinates, and then we'll query the database to see if it's a priority site.\n\n<think>\nFirst, I need to convert the address \"322 New Street, Brighton 3186\" into geographic coordinates using the AWS Geocode tool. Once I have the coordinates, I can use them to query the Priority Sites Register table in the database.\n</think>\n\n<action>\n{\n\"action\": \"AWS_Geocode\",\n\"action_input\": \"322 New Street, Brighton 3186, Victoria, Australia\"\n}\n</action>\n\n"
+                            }
+                        ]
+                    }
+                },
+                "stopReason": "stop_sequence",
+                "usage": {"inputTokens": 1253, "outputTokens": 158, "totalTokens": 1411}
+            }
+            ```
+
+        **Native tool use response** (when ``tools`` param is provided and LLM invokes a tool):
+
+            ```json
+            {
+                "output": {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "text": "Let me explore the task directory first."
+                            },
+                            {
+                                "toolUse": {
+                                    "toolUseId": "tooluse_abc123",
+                                    "name": "shell",
+                                    "input": {"command": "ls -la /app && echo '---' && cat /app/README.md"}
+                                }
+                            }
+                        ]
+                    }
+                },
+                "stopReason": "tool_use",
+                "usage": {"inputTokens": 2048, "outputTokens": 95, "totalTokens": 2143}
+            }
+            ```
+
+            Note: ``stopReason`` is ``"tool_use"`` (not ``"stop_sequence"``), and ``content``
+            contains both ``text`` (reasoning) and ``toolUse`` (structured tool call) blocks.
+            The ``input`` dict is guaranteed valid JSON by the API — no parsing needed.
+        """
+        # Format for Converse API
+        inference_config = {
+            "maxTokens": max_new_tokens,
+        }
+        
+        # Claude 4.5+ models don't allow both temperature and top_p
+        # Newer models (Opus 4.5+, Sonnet 4.6+) require temperature only
+        model_lower = self.model_name.lower()
+        if any(tag in model_lower for tag in ["opus-4", "sonnet-4-6", "sonnet-4-5"]):
+            inference_config["temperature"] = temperature
+        else:
+            inference_config["temperature"] = temperature
+            inference_config["topP"] = top_p
+        
+        converse_params = {
+            "modelId": self.model_name,
+            "messages": messages,
+            "inferenceConfig": inference_config,
+        }
+        if stop:
+            converse_params['inferenceConfig']["stopSequences"] = stop
+        
+        # Request LLM response
+        if system_prompt:
+            converse_params["system"] = [{"text": system_prompt}]
+        if tools:
+            converse_params["toolConfig"] = self._build_tool_config(tools)
+        try:
+            logger.debug(f"Converse API call with params: {converse_params}")
+            response = self.client.converse(**converse_params)
+        except (ClientError, NoCredentialsError) as e:
+            # Log concise error without full params (which can be very long)
+            error_msg = str(e)
+            
+            # Extract key info from error
+            if "Input is too long" in error_msg:
+                # Extract token counts if available
+                import re
+                token_match = re.search(r'input length is (\d+) tokens.*maximum.*?(\d+) tokens', error_msg)
+                if token_match:
+                    input_len, max_len = token_match.groups()
+                    concise_msg = f"Input too long: {input_len} tokens (max: {max_len})"
+                else:
+                    concise_msg = "Input exceeds model's maximum context length"
+            else:
+                # Truncate other errors
+                concise_msg = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
+            
+            logging.error(f"Bedrock Converse API call failed: {concise_msg}")
+            raise RuntimeError(f"Bedrock Converse API call failed: {concise_msg}")
+        
+        # Parse response — check for tool use
+        content = response.get("output", {}).get("message", {}).get("content", [])
+        tool_calls = []
+        text_parts = []
+        raw_content_blocks = []
+
+        for block in content:
+            if "text" in block:
+                text_parts.append(block["text"])
+                raw_content_blocks.append(block)
+            elif "toolUse" in block:
+                tu = block["toolUse"]
+                tool_calls.append(ToolCall(
+                    id=tu["toolUseId"],
+                    name=tu["name"],
+                    input_args=tu.get("input", {}),
+                ))
+                raw_content_blocks.append(block)
+
+        text = " ".join(text_parts).strip()
+        input_tokens = response.get("usage", {}).get("inputTokens", 0)
+        output_tokens = response.get("usage", {}).get("outputTokens", 0)
+        stop_reason = response.get("stopReason", "end_turn")
+
+        if tool_calls:
+            raw_message = {"role": "assistant", "content": raw_content_blocks}
+            tool_output = ToolCallOutput(
+                text=text,
+                tool_calls=tool_calls,
+                stop_reason=stop_reason,
+                raw_message=raw_message,
+            )
+            # Attach token counts for logging in __call__
+            tool_output._input_tokens = input_tokens
+            tool_output._output_tokens = output_tokens
+            logger.info(f"Native tool call: {[f'{tc.name}({tc.input_args})' for tc in tool_calls]} (in={input_tokens}, out={output_tokens})")
+            return tool_output
+        return text, input_tokens, output_tokens
+        
+    def batch_generate(self, prompts: List[str], **kwargs):
+        """Sequential batch inference (for self-consistency)."""
+        return [self(p, **kwargs).text for p in prompts]
+
+    def sc_generate(self, example_txt: str, n_sc: int, bs: int = 8, **kwargs):
+        """Self-consistency generation."""
+        outputs = []
+        for _ in range(n_sc):
+            outputs.append(self(example_txt, **kwargs).text.strip())
+        return outputs
+
+    @classmethod
+    def load_from_bedrock(cls, model_name: str, **kwargs):
+        """Convenience constructor."""
+        return cls(model_name, **kwargs)

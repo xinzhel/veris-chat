@@ -179,7 +179,7 @@ Type=simple
 User=ec2-user
 WorkingDirectory=${APP_DIR}
 Environment="PATH=/home/ec2-user/.local/bin:/usr/bin"
-ExecStart=/home/ec2-user/.local/bin/uvicorn app.chat_api:app --host 0.0.0.0 --port 8000
+ExecStart=/home/ec2-user/.local/bin/uvicorn main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=5
 

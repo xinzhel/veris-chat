@@ -1,0 +1,656 @@
+"""
+lits-eval: Evaluate tree search results from checkpoint files.
+
+Usage:
+    lits-eval --result_dir results/math500_rest/run_0.2.10 --dataset_name math500 \
+        --eval_model_name bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0
+    lits-eval --result_dir results/blocksworld_rap/run_0.2.10 --dataset_name blocksworld \
+        --eval_model_name bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0
+    lits-eval --help
+
+Auto-loads import_modules and dataset_kwargs from config.json in result_dir.
+See docs/cli/search.md for full CLI documentation.
+"""
+
+import sys
+import os
+import json
+import logging
+import argparse
+import traceback
+from pathlib import Path
+from typing import List, Dict, Any, Callable
+
+from dotenv import load_dotenv, find_dotenv
+from tqdm import tqdm
+
+from lits.agents.tree.node import SearchNode, MCTSNode
+from lits.agents.tree.common import extract_answers_from_terminal_nodes
+from lits.benchmarks.registry import load_dataset, has_resource, has_evaluator, get_evaluator
+from lits.components.registry import ComponentRegistry
+from lits.registry import import_custom_modules, load_config_from_result_dir
+from lits.components.utils import get_fn_retrieve_answer
+from lits.lm import get_lm
+from lits.eval.inference_report import generate_report
+from lits.log import setup_logging
+from lits.structures import ToolUseState, ToolUseStep  # Import to register types
+from lits.structures.env_grounded import EnvState, EnvStep  # Import to register types
+
+logger = logging.getLogger(__name__)
+
+
+def load_terminal_nodes_from_file(filepath: Path) -> Dict[str, Any]:
+    """
+    Load terminal nodes from a checkpoint file.
+    
+    Args:
+        filepath: Path to terminal_nodes_{query_idx}.json file
+    
+    Returns:
+        Dictionary containing terminal_nodes, query, and query_idx
+    """
+    with open(filepath, 'r') as f:
+        data = json.load(f)
+    
+    # Handle empty terminal_nodes list
+    if not data['terminal_nodes']:
+        return {
+            'terminal_nodes': [],
+            'query': data['query'],
+            'query_idx': data['query_idx']
+        }
+    
+    # Deserialize nodes using from_dict
+    # Determine node type from the data
+    if 'cum_rewards' in data['terminal_nodes'][0]:
+        node_class = MCTSNode
+    else:
+        node_class = SearchNode
+    
+    terminal_nodes = [node_class.from_dict(node_dict) for node_dict in data['terminal_nodes']]
+    
+    return {
+        'terminal_nodes': terminal_nodes,
+        'query': data['query'],
+        'query_idx': data['query_idx']
+    }
+
+
+def get_goal_check_from_registry(dataset_name: str) -> Callable:
+    """Get goal_check function from registry for env_grounded tasks.
+    
+    Args:
+        dataset_name: Name of the registered benchmark
+        
+    Returns:
+        The goal_check static method from the registered Transition class
+        
+    Raises:
+        KeyError: If the benchmark is not registered
+    """
+    try:
+        TransitionCls = ComponentRegistry.get_transition(dataset_name)
+    except KeyError as e:
+        available = ComponentRegistry.list_by_task_type("env_grounded")
+        raise KeyError(
+            f"Benchmark '{dataset_name}' not found in registry. "
+            f"Available env_grounded benchmarks: {available}. "
+            f"Did you forget to import the module containing @register_transition('{dataset_name}')?"
+        ) from e
+    
+    if not hasattr(TransitionCls, 'goal_check'):
+        raise AttributeError(
+            f"Transition class '{TransitionCls.__name__}' for benchmark '{dataset_name}' "
+            f"does not have a 'goal_check' static method."
+        )
+    
+    return TransitionCls.goal_check
+
+
+def is_env_grounded_task(dataset_name: str) -> bool:
+    """Check if dataset is an env_grounded task using registry."""
+    env_grounded_benchmarks = ComponentRegistry.list_by_task_type("env_grounded")
+    return dataset_name.lower() in [b.lower() for b in env_grounded_benchmarks]
+
+
+def evaluate_from_checkpoints(
+    result_dir: str,
+    dataset_name: str,
+    eval_model_name: str,
+    offset: int = 0,
+    limit: int = None,
+    dataset_kwargs: dict = None,
+    input_price_per_m: float = None,
+    output_price_per_m: float = None,
+    verbose: bool = False,
+    llm_eval_mode: str = "binary",
+):
+    """
+    Evaluate tree search results from checkpoint files.
+    
+    Args:
+        result_dir: Directory containing terminal_nodes_*.json files
+        dataset_name: Name of the dataset (e.g., 'gsm8k', 'math500', 'blocksworld')
+        eval_model_name: Model name used for answer extraction
+        offset: Dataset offset used during search
+        limit: Dataset limit used during search
+        dataset_kwargs: Dataset-specific arguments (loaded from config)
+        verbose: If True, print detailed output to console
+    """
+    result_dir = Path(result_dir)
+    
+    # Setup logging - only log to file, not console (unless verbose)
+    eval_logger = setup_logging(
+        run_id="eval",
+        result_dir=result_dir,
+        add_console_handler=verbose,
+        verbose=True
+    )
+    
+    from lits.cli import log_command
+    log_command(eval_logger)
+    
+    # Determine task type using registry
+    is_env_grounded = is_env_grounded_task(dataset_name)
+    is_tool_use = has_resource(dataset_name)
+    
+    # Load dataset for ground truths (not needed for env_grounded tasks)
+    if is_env_grounded:
+        # For env_grounded tasks, get goal_check from registry
+        goal_check = get_goal_check_from_registry(dataset_name)
+        full_dataset = None
+        eval_logger.info(f"Evaluating {dataset_name} results (goal checking via registry)")
+    elif is_tool_use:
+        # Tool-use datasets are registered via @register_dataset, same as other task types
+        full_dataset = load_dataset(dataset_name, **(dataset_kwargs or {}))
+        # NOTE: Do NOT slice the dataset here. The query_idx in terminal node files
+        # refers to the original dataset index, not the sliced index.
+    else:
+        dataset_kwargs = dataset_kwargs or {}
+        full_dataset = load_dataset(dataset_name, **dataset_kwargs)
+        # NOTE: Do NOT slice the dataset here. The query_idx in terminal node files
+        # refers to the index within the (possibly filtered) dataset used during search.
+        # We need the same filtered dataset to look up ground truths by query_idx.
+    
+    # Create a minimal model instance for answer retrieval (not needed for env_grounded)
+    if not is_env_grounded:
+        base_model = get_lm(eval_model_name)
+    
+    # Get answer retrieval function
+    if is_env_grounded:
+        # For environment-grounded tasks, check goal satisfaction
+        def retrieve_answer_from_env_node(node, query):
+            """Extract final state and check goal satisfaction."""
+            if hasattr(node, 'state') and node.state:
+                state = node.state
+                if isinstance(state, EnvState):
+                    # Get the final env_state (after all steps)
+                    final_env_state = state.env_state
+                    is_reached, score = goal_check(query, final_env_state)
+                    return "correct" if is_reached else "incorrect"
+            return "incorrect"
+        retrieve_answer = retrieve_answer_from_env_node
+    elif is_tool_use:
+        # For tool use, extract answer from the step (stored in node)
+        def retrieve_answer_from_tool_use_node(node, query):
+            # Check if node has a step with an answer
+            if hasattr(node, 'step') and node.step:
+                step = node.step
+                if hasattr(step, 'answer') and step.answer:
+                    return step.answer
+                # Try to get answer from step dict if not deserialized
+                if isinstance(step, dict) and 'answer' in step:
+                    return step['answer']
+            # Fallback: check state
+            if hasattr(node, 'state') and node.state:
+                if isinstance(node.state, list) and len(node.state) > 0:
+                    last_step = node.state[-1]
+                    if isinstance(last_step, dict) and 'answer' in last_step:
+                        return last_step['answer']
+            return ""
+        retrieve_answer = retrieve_answer_from_tool_use_node
+    else:
+        retrieve_answer = get_fn_retrieve_answer(base_model)
+    
+    # Find result files: terminal_nodes/ (tree search) or checkpoints/ (chain)
+    terminal_nodes_dir = result_dir / "terminal_nodes"
+    checkpoints_dir = result_dir / "checkpoints"
+    use_chain_checkpoints = False
+
+    if terminal_nodes_dir.exists():
+        terminal_node_files = sorted(terminal_nodes_dir.glob("terminal_nodes_*.json"),
+                                     key=lambda f: int(f.stem.split('_')[-1]))
+        if not terminal_node_files:
+            eval_logger.error(f"No terminal node files found in {terminal_nodes_dir}")
+            return
+        eval_logger.info(f"Found {len(terminal_node_files)} terminal node files")
+    elif checkpoints_dir.exists():
+        # Chain agent checkpoints: {idx}.json containing serialized TrajectoryState
+        terminal_node_files = sorted(checkpoints_dir.glob("*.json"),
+                                     key=lambda f: int(f.stem) if f.stem.isdigit() else float('inf'))
+        if not terminal_node_files:
+            eval_logger.error(f"No checkpoint files found in {checkpoints_dir}")
+            return
+        use_chain_checkpoints = True
+        eval_logger.info(f"Found {len(terminal_node_files)} chain checkpoint files")
+    else:
+        eval_logger.error(f"Neither terminal_nodes/ nor checkpoints/ found in {result_dir}")
+        return
+    
+    # Filter terminal node files by offset and limit based on query_idx
+    # The query_idx in terminal node files corresponds to the original dataset index
+    end_idx = offset + limit if limit is not None else None
+    
+    def should_include_file(filepath):
+        """Check if file's query_idx falls within [offset, offset+limit) range."""
+        # Extract query_idx from filename:
+        #   terminal_nodes_{query_idx}.json  (tree search)
+        #   {query_idx}.json                 (chain checkpoints)
+        filename = filepath.stem
+        try:
+            idx = int(filename.split('_')[-1]) if '_' in filename else int(filename)
+            if idx < offset:
+                return False
+            if end_idx is not None and idx >= end_idx:
+                return False
+            return True
+        except ValueError:
+            return True  # Include files with non-standard names
+    
+    filtered_files = [f for f in terminal_node_files if should_include_file(f)]
+    eval_logger.info(f"Processing {len(filtered_files)} files (offset={offset}, limit={limit})")
+    
+    # Process each file and extract answers
+    predictions = []
+    ground_truths = []
+    query_indices = []  # Track dataset query indices for correct log output
+    soft_scores = []  # For env_grounded tasks: word-level accuracy scores
+    
+    # Use tqdm progress bar for console feedback
+    for filepath in tqdm(filtered_files, desc="Evaluating", unit="file"):
+        try:
+            # --- Chain checkpoint path: load ToolUseState directly ---
+            if use_chain_checkpoints:
+                from lits.structures.tool_use import ToolUseState
+                query, state = ToolUseState.load(str(filepath))
+                query_idx = int(filepath.stem)
+                ground_truth = str(full_dataset[query_idx]['answer'])
+                answer_pred = state.get_final_answer() or ""
+                predictions.append(answer_pred)
+                ground_truths.append(ground_truth)
+                query_indices.append(query_idx)
+                eval_logger.debug(f"Query {query_idx}: Pred='{answer_pred}', Truth='{ground_truth}'")
+                continue
+
+            # --- Tree search path: load terminal nodes ---
+            data = load_terminal_nodes_from_file(filepath)
+            terminal_nodes = data['terminal_nodes']
+            query = data['query']
+            query_idx = data['query_idx']
+            
+            # Get ground truth based on task type
+            if is_env_grounded:
+                # For BlocksWorld, ground truth is always "correct" if goal is reached
+                ground_truth = "correct"
+            else:
+                ground_truth = str(full_dataset[query_idx]['answer'])
+            
+            # Extract answer
+            if is_env_grounded:
+                # For environment-grounded, check if any terminal node reached the goal
+                if terminal_nodes:
+                    # Sort by cumulative reward (descending) to get best node first
+                    def get_best_reward(node):
+                        if hasattr(node, 'cum_rewards') and node.cum_rewards:
+                            return max(node.cum_rewards) if isinstance(node.cum_rewards, list) else node.cum_rewards
+                        return -float('inf')
+                    sorted_nodes = sorted(terminal_nodes, key=get_best_reward, reverse=True)
+                    # Check the best terminal node (highest cumulative reward)
+                    best_node = sorted_nodes[0]
+                    if hasattr(best_node, 'state') and best_node.state:
+                        state = best_node.state
+                        if isinstance(state, EnvState):
+                            final_env_state = state.env_state
+                            is_reached, score = goal_check(query, final_env_state)
+                            answer_pred = "correct" if is_reached else "incorrect"
+                            soft_scores.append(score)
+                        else:
+                            answer_pred = "incorrect"
+                            soft_scores.append(0.0)
+                    else:
+                        answer_pred = "incorrect"
+                        soft_scores.append(0.0)
+                else:
+                    answer_pred = "incorrect"
+                    soft_scores.append(0.0)
+                    eval_logger.warning(f"Query {query_idx}: No terminal nodes found")
+            elif is_tool_use:
+                # Direct extraction from node
+                answer_pred = retrieve_answer(terminal_nodes[0], query) if terminal_nodes else ""
+                ground_truth = "Option " + ground_truth if "mapeval" in dataset_name else ground_truth
+            else:
+                # Use voting for QA tasks
+                vote_answers, answer_reward_d, best_node, trace_of_nodes = extract_answers_from_terminal_nodes(
+                    terminal_nodes_collected=terminal_nodes,
+                    retrieve_answer=retrieve_answer,
+                    query=query
+                )
+                # Get prediction
+                if len(vote_answers) > 0:
+                    answer_pred = max(vote_answers, key=lambda answer: vote_answers[answer])
+                else:
+                    answer_pred = ''
+            
+            predictions.append(answer_pred)
+            ground_truths.append(ground_truth)
+            query_indices.append(query_idx)
+            
+            # Log to file only
+            eval_logger.debug(f"Query {query_idx}: Pred='{answer_pred}', Truth='{ground_truth}'")
+            
+        except Exception as e:
+            eval_logger.error(f"Error processing {filepath}: {e}")
+            eval_logger.error(traceback.format_exc())
+            continue
+    
+    # Calculate accuracy
+    # Accuracy comparison priority:
+    # 1. env_grounded: exact string match (goal_check already applied during answer extraction above)
+    # 2. registered evaluator: dataset-specific comparison (e.g., dbbench float tolerance + set match)
+    # 3. LLM-based evaluation: for tool-use tasks where answers may be verbose
+    # 4. eval_output: generic number comparison (math QA tasks)
+    #
+    # LLM usage in evaluation (--eval-model):
+    #   - Language-grounded tasks: LLM extracts/formats the answer from verbose model
+    #     output (e.g., extracting "18" from a reasoning trace) via retrieve_answer.
+    #   - Tool-use tasks: GeneralEvaluator uses LLM as a judge to compare predicted
+    #     vs ground-truth answers, handling verbose/reformatted predictions that fail
+    #     exact string matching (e.g., "Women +60kg Bronze" vs full-sentence answer).
+    from lits.components.utils import eval_output
+    
+    custom_evaluator = get_evaluator(dataset_name) if has_evaluator(dataset_name) else None
+    if custom_evaluator:
+        eval_logger.info(f"Using registered evaluator for '{dataset_name}'")
+    
+    # Setup LLM-based evaluator for tool-use tasks (verbose answers)
+    llm_evaluator = None
+    if is_tool_use and llm_eval_mode != "none":
+        from lits.eval.general_eval import GeneralEvaluator
+        if llm_eval_mode == "f1":
+            llm_evaluator = GeneralEvaluator(
+                base_model=base_model,
+                eval_perspectives=[{
+                    "eval_id": "score",
+                    "output_type": "float",
+                    "description": (
+                        "Compute the F1 score between the predicted and ground truth answer sets. "
+                        "F1 = 2 * precision * recall / (precision + recall), where "
+                        "precision = (correct predictions) / (total predictions), "
+                        "recall = (correct predictions) / (total ground truth elements). "
+                        "Output 0.0 if no overlap, 1.0 if exact match. "
+                        "Penalize both missing elements (low recall) and extra wrong elements (low precision)."
+                    ),
+                }],
+            )
+            eval_logger.info("LLM-based F1 score evaluator enabled (--llm-score)")
+        else:
+            llm_evaluator = GeneralEvaluator(
+                base_model=base_model,
+                eval_perspectives=[{
+                    "eval_id": "correct",
+                    "description": "Does the predicted answer contain the correct value? Ignore formatting differences, extra explanation, or markdown. Focus only on whether the core answer value matches.",
+                    "options": ["yes", "no"],
+                }],
+            )
+            eval_logger.info("LLM-based binary evaluator enabled")
+    
+    def _llm_fallback(pred, truth, prior_score=None):
+        """Run LLM evaluator fallback. Returns (correct: bool, score: float|None)."""
+        if llm_eval_mode == "f1":
+            llm_score = llm_evaluator.check_score(pred, truth)
+            final = max(prior_score, llm_score) if prior_score is not None else llm_score
+            return (final == 1.0), final
+        else:
+            return llm_evaluator.check_correct(pred, truth), prior_score
+
+    correct_count = 0
+    eval_scores = []  # Track continuous scores from evaluators that return float
+    eval_logger.info("=" * 40)
+    eval_logger.info("Detailed comparison:")
+    for qidx, pred, truth in zip(query_indices, predictions, ground_truths):
+        if is_env_grounded:
+            # Exact string match for env_grounded tasks
+            correct = (pred == truth)
+        elif custom_evaluator:
+            # Use dataset-specific evaluator (e.g., dbbench bool, kgqa F1 float)
+            score = None
+            try:
+                result = custom_evaluator(pred, truth)
+                if isinstance(result, float):
+                    score = result
+                    correct = (score == 1.0)
+                else:
+                    correct = bool(result)
+            except Exception as e:
+                correct = False
+                eval_logger.debug(f"  [{qidx}] custom evaluator failed: {e}")
+            if not correct and llm_evaluator:
+                correct, score = _llm_fallback(pred, truth, score)
+                eval_logger.debug(f"  [{qidx}] LLM fallback: correct={correct}, score={score}")
+            if score is not None:
+                eval_scores.append(score)
+        elif llm_evaluator:
+            # Tool-use without custom evaluator: use LLM directly
+            correct, score = _llm_fallback(pred, truth)
+            eval_logger.debug(f"  [{qidx}] LLM evaluator: correct={correct}, score={score}")
+            if score is not None:
+                eval_scores.append(score)
+        else:
+            # Use eval_output for number comparison in QA tasks
+            try:
+                correct = eval_output(truth, pred, type="number_exact")
+            except (AssertionError, ValueError) as e:
+                # Fallback to exact match if eval_output fails
+                correct = (pred == truth)
+                eval_logger.debug(f"  [{qidx}] eval_output failed: {e}")
+        eval_logger.info(f"  [{qidx}] Pred='{pred}', Truth='{truth}', Correct={correct}")
+        if correct:
+            correct_count += 1
+    eval_logger.info("=" * 40)
+    
+    total_count = len(predictions)
+    accuracy = correct_count / total_count if total_count > 0 else 0.0
+    
+    # Calculate soft accuracy for env_grounded tasks
+    soft_accuracy = None
+    if is_env_grounded and soft_scores:
+        soft_accuracy = sum(soft_scores) / len(soft_scores)
+    
+    # Calculate mean score for evaluators returning float (e.g., F1)
+    mean_score = None
+    if eval_scores:
+        mean_score = sum(eval_scores) / len(eval_scores)
+    
+    # Log detailed results to file
+    eval_logger.info("=" * 80)
+    eval_logger.info(f"Evaluation Results for {result_dir.name}")
+    eval_logger.info(f"Dataset: {dataset_name}")
+    eval_logger.info(f"Total Examples: {total_count}")
+    eval_logger.info(f"Correct: {correct_count}")
+    eval_logger.info(f"Accuracy (exact match): {accuracy:.4f} ({accuracy*100:.2f}%)")
+    if mean_score is not None:
+        eval_logger.info(f"Mean Score: {mean_score:.4f} ({mean_score*100:.2f}%)")
+    if soft_accuracy is not None:
+        eval_logger.info(f"Soft Accuracy (word-level): {soft_accuracy:.4f} ({soft_accuracy*100:.2f}%)")
+    eval_logger.info("=" * 80)
+    
+    # Log token usage metrics from existing inference log
+    eval_logger.info("Token Usage Metrics:")
+    report_kwargs = {}
+    if input_price_per_m is not None:
+        report_kwargs["input_price_per_m"] = input_price_per_m
+    if output_price_per_m is not None:
+        report_kwargs["output_price_per_m"] = output_price_per_m
+    report = generate_report(str(result_dir), **report_kwargs)
+    eval_logger.info(report)
+    
+    # Print concise summary to console
+    print()
+    print("=" * 60)
+    print(f"  Evaluation Results: {result_dir.name}")
+    print("=" * 60)
+    print(f"  Dataset:    {dataset_name}")
+    print(f"  Examples:   {total_count}")
+    print(f"  Correct:    {correct_count}")
+    print(f"  Accuracy:   {accuracy:.4f} ({accuracy*100:.2f}%)")
+    if mean_score is not None:
+        print(f"  Mean Score: {mean_score:.4f} ({mean_score*100:.2f}%)")
+    if soft_accuracy is not None:
+        print(f"  Soft Acc:   {soft_accuracy:.4f} ({soft_accuracy*100:.2f}%)")
+    print("=" * 60)
+    print()
+    print(report)
+    
+    # Save evaluation results
+    eval_results = {
+        'dataset_name': dataset_name,
+        'result_dir': str(result_dir),
+        'total_examples': total_count,
+        'correct_count': correct_count,
+        'accuracy': accuracy,
+        'predictions': predictions,
+        'ground_truths': ground_truths
+    }
+    
+    # Add soft accuracy for env_grounded tasks
+    if soft_accuracy is not None:
+        eval_results['soft_accuracy'] = soft_accuracy
+        eval_results['soft_scores'] = soft_scores
+    
+    return eval_results
+
+
+def main() -> int:
+    """Entry point for lits-eval command.
+    
+    Evaluates tree search results from checkpoint files. Auto-loads
+    import_modules and dataset_kwargs from config.json in result_dir.
+    
+    Returns:
+        Exit code (0 for success, non-zero for error)
+    """
+    # Load .env — find_dotenv() searches upward from cwd
+    load_dotenv(find_dotenv())
+
+    parser = argparse.ArgumentParser(
+        description="Evaluate tree search results from checkpoint files",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Evaluate results (auto-loads dataset_name, eval_model_name, import_modules from config)
+  lits-eval --result_dir demo_results
+  
+  # Explicit overrides
+  lits-eval --result_dir claude35v1_results/blocksworld_rap/run_0.2.10 \\
+      --dataset_name blocksworld --eval_model_name bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0
+  
+  # Evaluate custom benchmark (import module to register Transition)
+  lits-eval --result_dir results/robot_arm_rap/run_0.2.10 \\
+      --dataset_name robot_arm --eval_model_name bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0 \\
+      --include my_project.robot_arm
+"""
+    )
+    parser.add_argument("--result_dir", type=str, required=True, help="Directory containing terminal_nodes/ subdirectory")
+    parser.add_argument("--dataset_name", type=str, default=None, help="Dataset name (e.g., gsm8k, math500, blocksworld). Auto-loaded from config.json if not specified.")
+    parser.add_argument("--eval_model_name", type=str, default=None, help="Model name used for answer extraction. Auto-loaded from config.json if not specified.")
+    parser.add_argument("--offset", type=int, default=0, help="Dataset offset used during search")
+    parser.add_argument("--limit", type=int, default=None, help="Dataset limit used during search")
+    parser.add_argument(
+        "--include",
+        dest="import_modules",
+        type=str,
+        nargs="+",
+        metavar="MODULE",
+        help="Python module(s)/package(s) to include for custom component registration. Auto-loaded from config if not specified."
+    )
+    parser.add_argument("--input-price", type=float, default=None, help="Price per 1M input tokens (for cost estimation)")
+    parser.add_argument("--output-price", type=float, default=None, help="Price per 1M output tokens (for cost estimation)")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Print detailed output to console (default: progress bar + summary only)")
+    parser.add_argument("--llm-eval", choices=["binary", "f1", "none"], default="binary",
+                        help="LLM fallback evaluator mode: 'binary' (default, yes/no), 'f1' (float F1 score), 'none' (disable LLM fallback)")
+    
+    args = parser.parse_args()
+    
+    # Validate result_dir exists
+    if not Path(args.result_dir).exists():
+        print(f"Error: Directory not found: {args.result_dir}", file=sys.stderr)
+        return 1
+    
+    # Load config from result_dir if available (for auto-loading import_modules)
+    config = load_config_from_result_dir(args.result_dir, config_filename="config.json")
+    
+    # Determine import_modules: CLI args override config (top-level field)
+    import_modules = args.import_modules
+    if not import_modules and config.get("import_modules"):
+        import_modules = config["import_modules"]
+        print(f"Auto-loaded import_modules from config: {import_modules}")
+    
+    # Load dataset_kwargs from config (top-level field)
+    dataset_kwargs = config.get("dataset_kwargs", {})
+    if dataset_kwargs:
+        print(f"Auto-loaded dataset_kwargs from config: {dataset_kwargs}")
+    
+    # Resolve dataset_name: CLI > config > error
+    dataset_name = args.dataset_name
+    if not dataset_name:
+        dataset_name = config.get("dataset") or config.get("benchmark")
+        if dataset_name:
+            print(f"Auto-loaded dataset_name from config: {dataset_name}")
+        else:
+            print("Error: --dataset_name not specified and not found in config.json", file=sys.stderr)
+            return 1
+
+    # Resolve eval_model_name: CLI > config (eval_model_name or policy_model_name) > error
+    eval_model_name = args.eval_model_name
+    if not eval_model_name:
+        eval_model_name = config.get("eval_model_name") or config.get("policy_model_name")
+        if eval_model_name:
+            print(f"Auto-loaded eval_model_name from config: {eval_model_name}")
+        else:
+            print("Error: --eval_model_name not specified and not found in config.json", file=sys.stderr)
+            return 1
+    
+    # Import custom modules to trigger registration
+    try:
+        import_custom_modules(import_modules)
+    except ImportError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    
+    try:
+        evaluate_from_checkpoints(
+            result_dir=args.result_dir,
+            dataset_name=dataset_name,
+            eval_model_name=eval_model_name,
+            offset=args.offset,
+            limit=args.limit,
+            dataset_kwargs=dataset_kwargs,
+            input_price_per_m=args.input_price,
+            output_price_per_m=args.output_price,
+            verbose=args.verbose,
+            llm_eval_mode=args.llm_eval,
+        )
+    except Exception as e:
+        print(f"Error during evaluation: {e}", file=sys.stderr)
+        traceback.print_exc()
+        return 1
+    
+    eval_log = Path(args.result_dir) / "eval.log"
+    if eval_log.exists():
+        print(f"Evaluation log saved to: {eval_log}")
+    
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
