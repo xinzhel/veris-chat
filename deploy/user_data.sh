@@ -142,9 +142,14 @@ sed -i "s|bolt://localhost:7687|${NEO4J_URI}|" ${APP_DIR}/config.yaml
 
 echo "=== Installing Python dependencies ==="
 cd ${APP_DIR}
+# Use EBS disk for tmp (tmpfs /tmp is only 1.9GB, too small for large packages)
+mkdir -p /home/ec2-user/tmp
+export TMPDIR=/home/ec2-user/tmp
 sudo -u ec2-user pip3.11 install --user --upgrade pip
 sudo -u ec2-user pip3.11 cache purge
-sudo -u ec2-user pip3.11 install --user  -v --no-cache-dir \
+
+# --- App dependencies ---
+sudo -u ec2-user TMPDIR=/home/ec2-user/tmp pip3.11 install --user --no-cache-dir \
     "pyyaml>=6.0" \
     "requests>=2.31.0" \
     "llama-index>=0.9.0" \
@@ -161,6 +166,34 @@ sudo -u ec2-user pip3.11 install --user  -v --no-cache-dir \
     fastapi \
     uvicorn \
     neo4j
+
+# --- lits dependencies (lits/ is in repo, but needs its runtime deps) ---
+sudo -u ec2-user TMPDIR=/home/ec2-user/tmp pip3.11 install --user --no-cache-dir \
+    "numpy>=2.2.5" \
+    "pandas>=2.2.3" \
+    "regex>=2024.5.15" \
+    "filelock>=3.18.0" \
+    "pydantic>=2.8.2" \
+    diskcache \
+    "openai>=1.35.10" \
+    "safetensors>=0.4.3" \
+    "tokenizers>=0.21.0" \
+    "transformers==4.51.3" \
+    "huggingface-hub>=0.30.2" \
+    datasets \
+    inflect \
+    langchain \
+    langchain-huggingface \
+    langchain-community \
+    sentence_transformers \
+    litellm \
+    pypdf \
+    ipython \
+    ipywidgets \
+    psycopg2-binary
+
+# Cleanup tmp
+rm -rf /home/ec2-user/tmp
 
 # ============================================================================
 # SYSTEMD SERVICE SETUP
