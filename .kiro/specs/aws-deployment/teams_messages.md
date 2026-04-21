@@ -25,7 +25,7 @@ Let me know if anything breaks or looks off.
 
 Hi Ozzy and Lukesh,
 
-The agentic version of the backend is now live on the same IP: **http://54.66.111.21:8000**
+The agentic version of the backend is now live on the same IP: **http://54.66.111.21:8000**, solving the issues we discussed last week (conversation context loss, inability to summarize full documents, etc.).
 
 ### What's new
 
@@ -34,7 +34,7 @@ The backend now has two modes running in parallel:
 - `/rag/*` — the existing RAG pipeline (same as v2, unchanged)
 - `/react/*` — new ReAct agent that uses LLM-driven tool use
 
-The ReAct agent lets the LLM decide how to answer: it can search documents semantically, or read an entire document for summarization. It also maintains full conversation history, so follow-up questions like "what did you just say about X?" work naturally.
+The ReAct (Reasoning-Acting) agent lets the LLM decide how to answer: it can search documents semantically, or read an entire document for summarization. It also maintains full conversation history, so follow-up questions like "what did you just say about X?" work naturally.
 
 ### New endpoints
 
@@ -79,4 +79,4 @@ The deploy repo has moved to: https://github.com/AEA-MapTalk/veris-llm-agent
 
 Full docs and test commands in the README.
 
-Let me know if anything breaks or looks off.
+Happy to give a live demo of how the system works and performs at the next group meeting. Let me know what time works.
