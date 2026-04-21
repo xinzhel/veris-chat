@@ -63,6 +63,24 @@ curl -X DELETE http://localhost:8000/react/sessions/433375739::test1
 
 State persists across requests via checkpoint files (`data/chat_state/`). No Mem0 — raw conversation history in `ToolUseState`, supports follow-up questions like "What did you just say about X?"
 
+### Why ReAct over RAG?
+
+| | RAG | ReAct |
+|---|---|---|
+| Retrieval | Fixed top-K semantic search | LLM chooses: search OR read full document |
+| Full-doc summary | ❌ Only top-5 chunks | ✅ `get_all_chunks` reads all pages |
+| Conversation context | Mem0 fact extraction (loses structure) | Full history in state |
+| "How many items did you list?" | ❌ "I did not provide a previous answer" | ✅ Correctly counts from history |
+
+Test scripts to demonstrate:
+```bash
+# RAG limitations
+API_HOST=localhost:8002 bash unit_test/test_rag_e2e_attack.sh
+
+# ReAct handles the same queries
+API_HOST=localhost:8002 bash unit_test/test_react_e2e_attack.sh
+```
+
 ---
 
 ## VERIS RAG

@@ -88,7 +88,8 @@ class SearchDocumentsTool(BaseTool):
             page = r.get("page_number", "?")
             score = r.get("score", 0)
             text = r.get("text", "")[:500]
-            lines.append(f"[{i}] {filename} (p.{page}, score={score:.3f}):\n{text}")
+            url = r.get("url", "")
+            lines.append(f"[{i}] {filename} (p.{page}, score={score:.3f}, url={url}):\n{text}")
         return "\n\n".join(lines)
 
 
