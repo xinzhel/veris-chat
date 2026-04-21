@@ -28,16 +28,15 @@
   - [x] lits/ is in git repo, cloned to EC2 automatically — no pip install needed
   - [x] Symlinks (chore/, prev_projects_repo/) committed as-is — broken on EC2, not imported
 
-- [ ] Task 4: Test push to new repo
-  - [ ] Run `bash deploy/push_clean.sh`
-  - [ ] Verify on GitHub: `https://github.com/AEA-MapTalk/veris-llm-agent` has `main.py`, `lits/`, `react/`, `rag_app/`, `react_app/`
+- [x] Task 4: Test push to new repo
+  - [x] Run `bash deploy/push_clean.sh`
+  - [x] Verified on GitHub: `https://github.com/AEA-MapTalk/veris-llm-agent` has `main.py`, `lits/`, `react/`, `rag_app/`, `react_app/`
 
-- [ ] Task 5: Deploy to `i-04083f11879703da7` (EIP `54.66.111.21`)
-  - [ ] Option A: Terminate + relaunch with updated `user_data.sh`
-  - [ ] Option B: SSH in, git pull from new repo, restart service
-  - [ ] Verify: `curl http://54.66.111.21:8000/health`
-  - [ ] Verify: `curl http://54.66.111.21:8000/react/chat/stream/` works
-  - [ ] Verify: `curl http://54.66.111.21:8000/rag/chat/stream/` works
+- [x] Task 5: Deploy to `i-04083f11879703da7` (EIP `54.66.111.21`)
+  - [x] SSH in, clone from new repo, restart service
+  - [x] Verify: `curl http://localhost:8002/health` → `{"status":"healthy"}`
+  - [x] Verify: `/react/chat/stream/` works (e2e tested)
+  - [ ] Verify: `/rag/chat/stream/` still works
 
 - [ ] Task 6: Coordinate with Lukesh
   - [ ] Notify: new endpoints are `/rag/*` and `/react/*` (not `/chat/*`)

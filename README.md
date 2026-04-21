@@ -12,9 +12,10 @@ Two parallel endpoints on the same FastAPI server:
 | ReAct | `/react/*` | LLM-driven tool use loop (search + summarize) | Conversation history in state |
 
 Infrastructure:
-- RAG EC2 (`54.66.111.21:8000`) — FastAPI + LlamaIndex + Qdrant Cloud
+- RAG+ReAct EC2 (`54.66.111.21:8000`) — FastAPI + LlamaIndex + Qdrant Cloud + lits ReAct agent
 - KG EC2 (`54.253.127.203:7687`) — Neo4j with Victorian environmental data (3.7M parcels)
 - Bedrock (us-east-1) — Claude Opus 4.6 via `us.*` inference profile (RMIT SCP)
+- Deploy repo: `https://github.com/AEA-MapTalk/veris-llm-agent.git` (branch: `deploy-clean`)
 
 ## Run API Server
 ```bash

@@ -76,13 +76,13 @@ T9 = docs/agents/AsyncNativeReAct.md
   - [x] `main.py`: `app = FastAPI()`, `app.include_router(rag_router, prefix="/rag")`, `app.include_router(react_router, prefix="/react")`
   - [x] Update `uvicorn` start command: `uvicorn main:app --reload`
 
-- [ ] Task 7: End-to-end test
-  - [ ] Test: parcel session → agent uses `search_documents` to answer question with citations
-  - [ ] Test: "summarize the document" → agent calls `get_all_chunks` + generates summary
-  - [ ] Test: follow-up question uses conversation history (state persists via checkpoint)
-  - [ ] Test: DELETE archives state file with timestamp, same session_id starts fresh
+- [x] Task 7: End-to-end test
+  - [x] Test: parcel session → agent uses `search_documents` to answer question with citations
+  - [x] Test: "summarize the document" → agent calls `get_all_chunks` + generates summary
+  - [x] Test: follow-up question uses conversation history (state persists via checkpoint)
+  - [x] Test: DELETE archives state file with timestamp, same session_id starts fresh
   - [ ] Test: `/rag/chat/stream/` still works unchanged
-  - [ ] Test: status events appear during tool calls
+  - [x] Test: status events appear during tool calls
 
 - [ ] Task 8: Citation follow-up test
   - [ ] Test multi-turn citation reasoning:
@@ -92,8 +92,8 @@ T9 = docs/agents/AsyncNativeReAct.md
     4. Agent calls `get_all_chunks(url=<resolved URL>)` and summarizes
   - [ ] Validates: conversation history in state + LLM reasoning over previous citations + tool use
 
-- [ ] Task 9: Write `docs/agents/AsyncNativeReAct.md` in lits_llm
-  - [ ] Explain "Native" = uses LLM's native tool use API (structured JSON tool calls), not text-based XML parsing
-  - [ ] Highlight provider-agnostic abstraction: `ToolCall`, `ToolCallOutput`, `format_tool_result()`, `tool_use_id`
-  - [ ] Architecture: AsyncBedrockChatModel → AsyncNativeToolUsePolicy → AsyncNativeReAct
-  - [ ] Usage examples: `from_tools()` factory, `run()`, `stream()`
+- [x] Task 9: Write `docs/agents/AsyncNativeReAct.md` in lits_llm
+  - [x] Explain "Native" = uses LLM's native tool use API (structured JSON tool calls), not text-based XML parsing
+  - [x] Highlight provider-agnostic abstraction: `ToolCall`, `ToolCallOutput`, `format_tool_result()`, `tool_use_id`
+  - [x] Architecture: AsyncBedrockChatModel → AsyncNativeToolUsePolicy → AsyncNativeReAct
+  - [x] Usage examples: `from_tools()` factory, `run()`, `stream()`
