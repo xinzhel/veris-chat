@@ -64,7 +64,7 @@ class KGClient:
             List of PDF URL strings. Empty list if parcel not found or no reports.
         """
         query = """
-            MATCH (p:Parcel)-[:hasOnsiteAssessment|hasOffsiteAssessment]->(a:Resource)
+            MATCH (p:Parcel)-[:hasOnsiteAssessment]->(a:Resource)
                   -[:hasAssessmentReport]->(r:AssessmentReport)
             WHERE $pfi IN p.hasPFI
             RETURN r.hasLink[0] AS pdf_url

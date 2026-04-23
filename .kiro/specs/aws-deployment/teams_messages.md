@@ -80,3 +80,29 @@ The deploy repo has moved to: https://github.com/AEA-MapTalk/veris-llm-agent
 Full docs and test commands in the README.
 
 Happy to give a live demo of how the system works and performs at the next group meeting. Let me know what time works.
+
+
+---
+
+## 2026-04-23 — KG Server Details
+
+Hi Ozzy and Lukesh,
+
+Quick update on the Neo4j knowledge graph server. Currently only the backend connects to it, but sharing the details so the frontend can align when needed:
+
+- **Server IP:** `54.253.127.203` (Elastic IP, instance `i-018c87e156b4cbd8a`)
+- **Bolt protocol:** `bolt://54.253.127.203:7687`
+- **Auth:** `neo4j` / `neo4jpassword`
+
+@Lukesh — when the frontend needs KG access, use the bolt address above to stay consistent with the backend.
+
+@Ozzy — the current data was loaded on **April 9, 2026** (4 files totalling ~5.9 GB). If you have newer data, you can:
+1. Upload to S3 bucket `veris-kg-data-xinzhe` (region: `ap-southeast-2`, same account — no extra keys needed, just `aws sso login`) and let me know to re-import, or
+2. Ask me for the SSH key (`race_lits_server.pem`) if you want to SSH in and do it yourself, or
+3. Just let me know and I'll handle the upload and re-import.
+
+---
+
+## 2026-04-21 — Reply to Lukesh's session handling question
+
+@Lukesh Just a note from the backend side — the DELETE endpoint archives the session state with a timestamp rather than destroying it (e.g., `433375739__test1__20260420_151615.json`). This makes it straightforward to add features like session restore or parcel-level history accumulation later if needed. Whatever session logic you and Ozzy decide on, I can adjust the backend to match. @Ozzy — worth noting that these archived trajectories could also be valuable longer-term for fine-tuning a more tailored model.
