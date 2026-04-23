@@ -240,8 +240,11 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
         # Resolve parcel data from KG (if parcel session)
         parcel_data = _resolve_parcel_data(request.session_id, logger)
         
-        # KG-resolved URLs override request document_urls
-        document_urls = parcel_data["document_urls"] or request.document_urls
+        # KG-resolved URLs, constrained by frontend if specified
+        if request.document_urls:
+            document_urls = request.document_urls
+        else:
+            document_urls = parcel_data["document_urls"]
         
         result = chat(
             session_id=request.session_id,
@@ -296,7 +299,10 @@ async def chat_stream_endpoint(request: ChatRequest):
             # Resolve parcel data from KG (if parcel session)
             yield formatter.format_sse({"type": "status", "content": "Resolving parcel data..."})
             parcel_data = _resolve_parcel_data(request.session_id, logger)
-            document_urls = parcel_data["document_urls"] or request.document_urls
+            if request.document_urls:
+                document_urls = request.document_urls
+            else:
+                document_urls = parcel_data["document_urls"]
             
             async for chunk in async_chat(
                 session_id=request.session_id,

@@ -129,7 +129,13 @@ async def react_stream_endpoint(request: ReactChatRequest):
     async def generate():
         try:
             parcel_data = _resolve_parcel_data(request.session_id, log)
-            document_urls = parcel_data.get("document_urls") or request.document_urls
+            kg_urls = parcel_data.get("document_urls")
+            if request.document_urls:
+                # Frontend explicitly specified URLs — use only those
+                document_urls = request.document_urls
+            else:
+                # No frontend override — use all KG URLs
+                document_urls = kg_urls
 
             async for chunk in react_chat(
                 session_id=request.session_id,
