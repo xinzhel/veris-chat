@@ -54,7 +54,7 @@ class KGClient:
         """
         Get all assessment report PDF URLs for a parcel.
 
-        Queries: Parcel -> hasOnsiteAssessment|hasOffsiteAssessment -> Resource
+        Queries: Parcel -> hasOnsiteAssessment -> Resource
                  -> hasAssessmentReport -> AssessmentReport.hasLink
 
         Args:
@@ -91,7 +91,7 @@ class KGClient:
         """
         # Single query for all assessment types (inspired by Oz's ALL_DETAILS_QUERY)
         query = """
-            MATCH (p:Parcel)-[rel:hasOnsiteAssessment|hasOffsiteAssessment]->(a:Resource)
+            MATCH (p:Parcel)-[rel:hasOnsiteAssessment]->(a:Resource)
             WHERE $pfi IN p.hasPFI
             RETURN type(rel) AS rel_type,
                    [l IN labels(a) WHERE l <> 'Resource'][0] AS category,
@@ -144,7 +144,7 @@ class KGClient:
             List of dicts with assessment properties + relationship type.
         """
         query = f"""
-            MATCH (p:Parcel)-[rel:hasOnsiteAssessment|hasOffsiteAssessment]->(a:{label})
+            MATCH (p:Parcel)-[rel:hasOnsiteAssessment]->(a:{label})
             WHERE $pfi IN p.hasPFI
             RETURN type(rel) AS rel_type, properties(a) AS props
         """
