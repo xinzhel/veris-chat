@@ -104,6 +104,9 @@ def format_parcel_context(
                 text = config["format"](item)
                 if prefix:
                     text = f"{prefix} {text}"
+                pdf_url = item.get("pdf_url")
+                if pdf_url:
+                    text = f"{text} | [PDF]({pdf_url})"
                 lines.append(f"- {text}")
 
         lines.append("")

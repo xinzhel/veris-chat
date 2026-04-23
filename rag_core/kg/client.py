@@ -89,13 +89,15 @@ class KGClient:
         Returns:
             Dict with 7 keys, each mapping to a list of assessment dicts.
         """
-        # Single query for all assessment types (inspired by Oz's ALL_DETAILS_QUERY)
+        # Single query for all assessment types + optional report URL
         query = """
             MATCH (p:Parcel)-[rel:hasOnsiteAssessment]->(a:Resource)
             WHERE $pfi IN p.hasPFI
+            OPTIONAL MATCH (a)-[:hasAssessmentReport]->(r:AssessmentReport)
             RETURN type(rel) AS rel_type,
                    [l IN labels(a) WHERE l <> 'Resource'][0] AS category,
-                   properties(a) AS props
+                   properties(a) AS props,
+                   r.hasLink[0] AS pdf_url
         """
         
         # Label → context key mapping
@@ -125,6 +127,9 @@ class KGClient:
                 for k, v in props.items():
                     if k != "uri":
                         entry[k] = _unpack(v)
+                pdf_url = record["pdf_url"]
+                if pdf_url:
+                    entry["pdf_url"] = pdf_url
                 context[key].append(entry)
 
         total = sum(len(v) for v in context.values())
