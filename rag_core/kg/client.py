@@ -107,6 +107,7 @@ class KGClient:
             "LandfillRegister": "vlr",
             "Overlay": "overlays",
             "HistoricalBusinessListing": "business_listings",
+            "GroundwaterQualityRestrictedUseZone": "gqruz",
         }
         
         # Initialize all 7 keys with empty lists

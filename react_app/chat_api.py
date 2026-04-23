@@ -128,6 +128,7 @@ async def react_stream_endpoint(request: ReactChatRequest):
 
     async def generate():
         try:
+            yield f"data: {json.dumps({'type': 'status', 'content': 'Resolving parcel data...'})}\n\n"
             parcel_data = _resolve_parcel_data(request.session_id, log)
             kg_urls = parcel_data.get("document_urls")
             if request.document_urls:
@@ -137,6 +138,7 @@ async def react_stream_endpoint(request: ReactChatRequest):
                 # No frontend override — use all KG URLs
                 document_urls = kg_urls
 
+            yield f"data: {json.dumps({'type': 'status', 'content': 'Ingesting documents...'})}\n\n"
             async for chunk in react_chat(
                 session_id=request.session_id,
                 message=request.message,

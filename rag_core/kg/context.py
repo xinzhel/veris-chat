@@ -66,6 +66,10 @@ _TYPE_CONFIG = {
         "title": "Historical Business Listings",
         "format": lambda item: _format_business(item),
     },
+    "gqruz": {
+        "title": "Groundwater Quality Restricted Use Zones (GQRUZ)",
+        "format": lambda item: _format_gqruz(item),
+    },
 }
 
 
@@ -158,4 +162,13 @@ def _format_business(item: Dict[str, Any]) -> str:
         parts.append("(HIGH contamination risk)")
     if date and date != "NaT":
         parts.append(f"[{date}]")
+    return " ".join(parts)
+
+
+def _format_gqruz(item: Dict[str, Any]) -> str:
+    restricted_use = item.get("hasRestrictedUse", "unknown")
+    date = item.get("assessmentDate", "")
+    parts = [f"Restricted use: {restricted_use}"]
+    if date and date != "NaT":
+        parts.append(f"({date})")
     return " ".join(parts)
