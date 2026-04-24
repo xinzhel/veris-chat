@@ -151,3 +151,32 @@ ssh -fN \
 ```
 
 This tunnels Neo4j (7687) and Qdrant Cloud (6333) through the KG EC2. Set `QDRANT_TUNNEL=true` in `.env`.
+
+<!-- ## Updating Server
+
+Three ways to push changes to EC2 (`54.66.111.21`), pick based on scope:
+
+**1. scp (small patches, few files)**
+```bash
+scp -i ~/.ssh/race_lits_server.pem <local_file> ec2-user@54.66.111.21:/home/ec2-user/veris-chat/<remote_path>
+sudo systemctl restart veris-chat
+```
+
+**2. ssh + manual edit (single-line hotfix)**
+```bash
+ssh -i ~/.ssh/race_lits_server.pem ec2-user@54.66.111.21
+# edit file directly, then:
+sudo systemctl restart veris-chat
+```
+
+**3. push_clean + full redeploy (major updates, new deps, new files)**
+```bash
+bash deploy/push_clean.sh          # force-push orphan deploy-clean branch
+# then on EC2:
+cd /home/ec2-user/veris-chat && git pull
+sudo systemctl restart veris-chat
+``` -->
+
+<!-- Download the checkpoint from the server:
+
+scp -i ~/.ssh/race_lits_server.pem ec2-user@54.66.111.21:/home/ec2-user/veris-chat/data/chat_state/210470171__web_1776904901352.json data/chat_state/ -->
